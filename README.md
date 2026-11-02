@@ -1,40 +1,37 @@
 # SorashiPartyFunBot
 
-Telegram party game. First game mode: **Quiplash**.
+Telegram party game. First mode: **Quiplash**.
 
 ## Architecture
-- Cloudflare Worker: Telegram webhook, API, Telegram Mini App static hosting.
-- Cloudflare Durable Objects: one authoritative real-time coordinator per room (WebSocket + alarms).
-- Supabase Postgres: durable users, rooms, rounds, prompts, answers, votes, scores.
-- Telegram group: room creation and invitation link. Players open the bot's Mini App via Telegram deep link.
+- Cloudflare Worker: Telegram webhook, authenticated game API and Mini App hosting.
+- Cloudflare Durable Objects: room WebSocket coordination.
+- Supabase Postgres: rooms, players, prompts, assignments, answers, votes and scores.
+- Telegram group: room creation and invitation link.
 
-## Development
+## Local development
 1. Install Node.js 22+.
-2. `npm install`
-3. Copy `.dev.vars.example` to `.dev.vars` and set secrets.
-4. Apply `supabase/migrations/0001_quiplash.sql` to the selected Supabase project.
+2. Run `npm install`.
+3. Copy `.dev.vars.example` to `.dev.vars` and fill in the values.
+4. Apply `supabase/migrations/0001_quiplash.sql` to the dedicated Supabase project.
 5. Run `npm run dev`.
-6. Configure Telegram webhook to `https://<worker-domain>/telegram/webhook` with the webhook secret header.
-7. Configure the bot's Main Mini App URL in BotFather.
 
-## Required Worker secrets
-- `BOT_TOKEN`
-- `TELEGRAM_WEBHOOK_SECRET`
-- `BOT_USERNAME`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+## Worker configuration
+`SUPABASE_URL` is a non-secret Wrangler variable in `wrangler.jsonc`. Set these as Worker secrets:
+- `BOT_TOKEN` — Telegram bot token.
+- `TELEGRAM_WEBHOOK_SECRET` — Telegram webhook secret header.
+- `ROOM_TICKET_SECRET` — random secret used to sign short-lived WebSocket tickets.
+- `SUPABASE_SERVICE_ROLE_KEY` — server-only Supabase key. Never expose it in browser code.
 
-Never put the Supabase service-role key or Telegram bot token in browser code.
+Set `BOT_USERNAME` as a Worker variable or secret. Configure the Telegram webhook at `https://<worker-domain>/telegram/webhook`, then set the Mini App URL in BotFather.
 
-## MVP game rules (initial target)
-- 4–10 players.
-- 3 rounds.
-- Each player answers 2 prompts per round.
-- 60 seconds to answer; 30 seconds to vote.
-- Responses are anonymous during voting.
-- Players cannot vote for their own response.
-- One point per received vote; ties are allowed.
-- Server-side deadlines and idempotent answer/vote writes.
+## Implemented game flow
+- 4–10 players; host starts the game.
+- 3 rounds; one shared prompt per round is assigned to all players.
+- Players submit answers privately.
+- Once all answers arrive, voting opens; answers are anonymous during voting.
+- Each player votes for every answer except their own.
+- Each received vote adds 1,000 points.
+- Host advances between rounds; the final round ends the game.
 
-## Current milestone
-Repository foundation and infrastructure scaffold. Room state coordinator and Telegram webhook are being established first; full round allocation, voting, score finalization, reconnect and automated tests are subsequent milestones.
+## Not yet implemented
+Round timers, two prompts per player per round, moderation/reporting, reconnect state sync beyond refresh, race-safe round transitions, automated integration tests and production deployment. Treat this as an MVP development build, not a public launch.
