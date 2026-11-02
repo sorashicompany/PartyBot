@@ -40,17 +40,17 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (room.status !== "answering") return json({ error: "Answer phase is closed" }, 409);
     if (answerText.length < 1 || answerText.length > 240) return json({ error: "Answer must be 1–240 characters" }, 400);
     const assignments = await getAssignments(env, room);
-    const ownAssignment = assignments.find(item => Number(item.player_telegram_id) === user.id);
+    const ownAssignment = assignments.find(item => Number(item.player_telegram_id) === user.id && item.id === String(body.assignmentId || ""));
     if (!ownAssignment) return json({ error: "No prompt assigned" }, 409);
     const existing = await supabaseRequest<Answer[]>(env, `answers?prompt_assignment_id=eq.${ownAssignment.id}&select=id`);
     if (existing.length) return json({ error: "Answer already submitted" }, 409);
     await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify({
-      room_id: room.id, round_number: room.round_number, prompt_assignment_id: ownAssignment.id,
-      author_telegram_id: user.id, answer_text: answerText
+      room_id: room.id, round_number: room.round_number, prompt_assignment_id: ownAssignment.id, prompt_id: ownAssignment.prompt_id,
+      author_telegram_id: user.id, answer_text: answerText, wager: Math.max(0, Number(body.wager || 0))
     }) });
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`);
-    if (answers.length === players.length) {
-      await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", updated_at: new Date().toISOString() }) });
+    if (answers.length >= (room.round_number === 3 ? players.length : players.length * 2)) {
+      await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", phase_deadline_at: new Date(Date.now() + 10000).toISOString(), updated_at: new Date().toISOString() }) });
       await castBotVotes(env, room, players);
       await notify(env, code, "voting_started", { round: room.round_number });
     } else {
@@ -70,14 +70,14 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (!target || target.prompt_assignment_id === ownAssignment.id || Number(target.author_telegram_id) === user.id) {
       return json({ error: "You cannot vote for this answer" }, 400);
     }
-    const ownVotes = await supabaseRequest<Vote[]>(env, `votes?answer_id=eq.${answerId}&voter_telegram_id=eq.${user.id}&select=answer_id`);
+    const ownVotes = await supabaseRequest<Vote[]>(env, `votes?prompt_id=eq.${target.prompt_id}&voter_telegram_id=eq.${user.id}&select=answer_id`);
     if (ownVotes.length) return json({ error: "Already voted for this answer" }, 409);
-    await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, voter_telegram_id: user.id }) });
+    await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
     const allVotes = await supabaseRequest<Vote[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=votes(answer_id,voter_telegram_id)`);
     const voteCount = allVotes.reduce((sum, answer) => sum + ((answer as unknown as { votes?: Vote[] }).votes?.length || 0), 0);
-    const expected = players.length * (players.length - 1);
+    const expected = (room.round_number === 3 ? 1 : players.length) * Math.max(0, players.length - 2);
     if (voteCount >= expected) {
-      await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "round_results", updated_at: new Date().toISOString() }) });
+      await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "round_results", phase_deadline_at: null, updated_at: new Date().toISOString() }) });
       await notify(env, code, "round_results", { round: room.round_number });
     }
     return json({ ok: true, voteCount, expected });
@@ -127,7 +127,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
 }
 
 async function getAssignments(env: Env, room: Room): Promise<Assignment[]> {
-  return supabaseRequest<Assignment[]>(env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_id,player_telegram_id`);
+  return supabaseRequest<Assignment[]>(env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_id,player_telegram_id,pair_key,prompt_slot`);
 }
 
 async function beginRound(env: Env, room: Room, players: Player[], round: number): Promise<void> {
