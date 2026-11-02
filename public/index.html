@@ -75,18 +75,21 @@
     document.querySelector('#players').innerHTML=s.players.map(p=>'<div class="player">'+esc(p.name)+(p.isHost?' · ведущий':'')+'<span class="score">'+p.score+'</span></div>').join('');
     action.innerHTML='';answersEl.innerHTML='';
     if(s.status==='lobby'){
-      action.innerHTML=s.isHost?'<button id="start">НАЧАТЬ ИГРУ</button>':'<p>Ожидаем ведущего. Для старта нужно 4–10 игроков.</p>';
+      action.innerHTML=s.isHost?'<label><input id="customToggle" type="checkbox" style="width:auto;letter-spacing:0" '+(s.customPromptsEnabled?'checked':'')+'> Использовать мои вопросы</label><textarea id="customPrompt" maxlength="240" placeholder="Добавить свой вопрос (5–240 символов)"></textarea><button class="secondary" id="addPrompt">ДОБАВИТЬ ВОПРОС</button><button id="start">НАЧАТЬ ИГРУ</button>':'<p>Ожидаем ведущего. Для старта нужно 4–10 игроков.</p>'; 
+      document.querySelector('#customToggle')?.addEventListener('change',e=>runAction('/api/game/settings',{customEnabled:e.target.checked}));
+      document.querySelector('#addPrompt')?.addEventListener('click',()=>{const value=document.querySelector('#customPrompt').value.trim();if(value)runAction('/api/game/settings',{customPrompt:value})});
       document.querySelector('#start')?.addEventListener('click',()=>runAction('/api/game/start',{}));
     }else if(s.status==='answering'){
-      const cards=(s.prompts||[]).map(p=>'<div class="answer"><div class="meta">ЗАДАНИЕ</div><p>'+esc(p.text)+'</p>'+(p.answered?'<div class="meta">Ответ принят</div>':'<textarea maxlength="240" data-answer="'+p.assignmentId+'" placeholder="напиши ответ строчными буквами…"></textarea><button data-submit="'+p.assignmentId+'">ОТПРАВИТЬ</button>')+'</div>').join('');
+      const cards=(s.prompts||[]).map(p=>'<div class="answer"><div class="meta">ВОПРОС '+(p.slot||1)+' ИЗ '+(s.round===3?1:2)+'</div><p>'+esc(p.text)+'</p><textarea maxlength="240" data-answer="'+p.assignmentId+'" placeholder="напиши ответ строчными буквами…"></textarea><button data-submit="'+p.assignmentId+'">ОТПРАВИТЬ</button></div>').join('');
       action.innerHTML=cards+(s.round===3?'<div class="answer"><label>Ставка финального раунда</label><input id="wager" type="number" min="0" max="10000" value="0" /></div>':'');
       action.querySelectorAll('[data-answer]').forEach(t=>t.addEventListener('input',()=>{const pos=t.selectionStart;t.value=t.value.toLocaleLowerCase('ru-RU');t.setSelectionRange(pos,pos)}));
       action.querySelectorAll('[data-submit]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.submit;const field=action.querySelector('[data-answer="'+id+'"]');runAction('/api/game/answer',{assignmentId:id,text:field.value,wager:Number(document.querySelector('#wager')?.value||0)})}));
     }else if(['voting','round_results','finished'].includes(s.status)){
-      const promptIds=[...new Set((s.answers||[]).map(a=>a.promptId))];
-      answersEl.innerHTML=promptIds.map(pid=>'<div class="answer"><div class="meta">'+esc(s.promptLabels?.[pid]||'ВОПРОС')+'</div>'+(s.answers||[]).filter(a=>a.promptId===pid).map(a=>'<div class="answer"><p>'+esc(a.text)+'</p><div class="meta">'+(a.name?esc(a.name):'Анонимно')+' · '+a.votes+' голосов</div>'+(s.status==='voting'&&!((s.answers||[]).some(x=>x.promptId===pid&&x.own))&&!a.voted?'<button class="secondary" data-vote="'+a.id+'">ВЫБРАТЬ ЭТОТ ОТВЕТ</button>':'')+'</div>').join('')+'</div>').join('');
+      const pid=s.activeVotingPromptId;
+      const current=(s.answers||[]).filter(a=>a.promptId===pid);
+      answersEl.innerHTML=pid?'<div class="answer"><div class="meta">ВОПРОС '+esc(s.promptLabels?.[pid]||'')+'</div>'+current.map(a=>'<div class="answer"><p>'+esc(a.text)+'</p><div class="meta">Анонимный ответ</div>'+(s.status==='voting'&&!current.some(x=>x.own)&&!a.voted?'<button class="secondary" data-vote="'+a.id+'">ВЫБРАТЬ ЭТОТ ОТВЕТ</button>':'')+'</div>').join('')+'</div>':'';
       answersEl.querySelectorAll('[data-vote]').forEach(b=>b.addEventListener('click',()=>runAction('/api/game/vote',{answerId:b.dataset.vote})));
-      if(s.status==='voting')action.innerHTML='<p>Выбери один ответ в каждом вопросе. Голосовать за себя нельзя.</p>';
+      if(s.status==='voting')action.innerHTML='<p>Выбери один из двух ответов. Следующий вопрос появится автоматически.</p>';
       if(s.status==='round_results')action.innerHTML=s.isHost?'<button id="next">СЛЕДУЮЩИЙ РАУНД</button>':'<p>Раунд завершён. Ждём ведущего.</p>';
       if(s.status==='finished')action.innerHTML='<p>Игра завершена. Итоговый счёт показан выше.</p>';
       document.querySelector('#next')?.addEventListener('click',()=>runAction('/api/game/next',{}));
