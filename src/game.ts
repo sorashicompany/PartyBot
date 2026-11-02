@@ -185,6 +185,7 @@ async function castBotVotes(env: Env, room: Room, players: Player[]): Promise<vo
   const allPromptIds = [...new Set(assignments.map(a => a.prompt_id))];
   const votes: Array<{ answer_id: string; prompt_id: string; voter_telegram_id: number }> = [];
   for (const botId of botIds) for (const promptId of allPromptIds) {
+    if (answers.some(a => a.prompt_id === promptId && Number(a.author_telegram_id) === botId)) continue;
     const options = answers.filter(a => a.prompt_id === promptId && Number(a.author_telegram_id) !== botId);
     if (options.length) votes.push({ answer_id: options[randomIndex(options.length)].id, prompt_id: promptId, voter_telegram_id: botId });
   }
