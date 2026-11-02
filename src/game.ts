@@ -143,7 +143,6 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
 }
 
 async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promise<void> {
-  const assignments = await getAssignments(env, room);
   const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,author_telegram_id`);
   const answerIds = answers.map(a => a.id);
   const votes = answerIds.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${answerIds.join(",")})&select=answer_id,voter_telegram_id`) : [];
