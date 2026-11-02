@@ -27,7 +27,8 @@ export async function verifyRoomTicket(secret: string, ticket: string, expectedC
   if (!secret) return null;
   const parts = ticket.split(".");
   if (parts.length !== 2) return null;
-  const valid = await crypto.subtle.verify("HMAC", await hmacKey(secret, ["verify"]), fromBase64Url(parts[1]), new TextEncoder().encode(parts[0]));
+  const signature = new Uint8Array(fromBase64Url(parts[1])).buffer;
+  const valid = await crypto.subtle.verify("HMAC", await hmacKey(secret, ["verify"]), signature, new TextEncoder().encode(parts[0]));
   if (!valid) return null;
   try {
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(parts[0]))) as { code: string; userId: number; exp: number };
