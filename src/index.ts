@@ -68,7 +68,7 @@ export default {
   }
 };
 
-async function authenticateMiniApp(request: Request, botToken: string): Promise<{ id: number; first_name: string; last_name?: string }> {
+export async function authenticateMiniApp(request: Request, botToken: string): Promise<{ id: number; first_name: string; last_name?: string }> {
   const initData = request.headers.get("X-Telegram-Init-Data") || "";
   if (!initData || initData.length > 8192) throw new Error("Missing Telegram initData");
   const params = new URLSearchParams(initData);
