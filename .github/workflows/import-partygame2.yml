@@ -33,12 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/imported/partygame2
-          rsync -a --delete \\
-            --exclude='.git/' \\
-            --exclude='node_modules/' \\
-            --exclude='.vercel/output/' \\
-            --exclude='.grok/' \\
-            source/ target/imported/partygame2/
+          rsync -a --delete --exclude='.git/' --exclude='node_modules/' --exclude='.vercel/output/' --exclude='.grok/' source/ target/imported/partygame2/
           cat > target/imported/partygame2/IMPORT-NOTES.md <<'EOF'
           # PartyGame2 source import
 
