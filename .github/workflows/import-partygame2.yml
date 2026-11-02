@@ -2,6 +2,9 @@ name: Import PartyGame2 source
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/import-partygame2.yml"
 
 permissions:
   contents: write
@@ -13,7 +16,7 @@ jobs:
       - name: Checkout PartyBot
         uses: actions/checkout@v4
         with:
-          ref: partygame2-telegram-port
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
           path: target
 
@@ -30,11 +33,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/imported/partygame2
-          rsync -a --delete \
-            --exclude='.git/' \
-            --exclude='node_modules/' \
-            --exclude='.vercel/output/' \
-            --exclude='.grok/' \
+          rsync -a --delete \\
+            --exclude='.git/' \\
+            --exclude='node_modules/' \\
+            --exclude='.vercel/output/' \\
+            --exclude='.grok/' \\
             source/ target/imported/partygame2/
           cat > target/imported/partygame2/IMPORT-NOTES.md <<'EOF'
           # PartyGame2 source import
@@ -44,10 +47,12 @@ jobs:
           metadata are excluded. Application source, assets, scripts, migrations,
           tests, and lockfiles are retained.
 
-          The imported app is intentionally isolated from the existing Cloudflare
-          Worker until its auth, data, and runtime adapters are ported. Do not expose
-          Supabase service-role credentials to the browser. Telegram Mini App
-          identity must be verified server-side from Telegram.WebApp.initData.
+          The root application remains the Telegram Mini App running on Cloudflare
+          Workers. The imported app source is retained here for complete provenance;
+          runtime-specific auth and data adapters must be reviewed before replacing
+          the root application. Never expose Supabase service-role credentials to
+          the browser. Telegram Mini App identity must be verified server-side from
+          Telegram.WebApp.initData.
           EOF
 
       - name: Commit imported source
@@ -63,4 +68,4 @@ jobs:
             exit 0
           fi
           git commit -m "Import PartyGame2 application source"
-          git push origin HEAD:partygame2-telegram-port
+          git push origin HEAD:main
