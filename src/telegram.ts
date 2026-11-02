@@ -1,4 +1,5 @@
 import type { Env, TelegramUpdate } from "./types";
+import { BOT_PLAYERS } from "./bots";
 
 export async function sendTelegramMessage(
   env: Env,
@@ -60,6 +61,17 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
     })
   });
   if (!playerResponse.ok) throw new Error(`Host membership insert failed: ${playerResponse.status}`);
+
+  const botResponse = await fetch(new URL("/rest/v1/room_players", env.SUPABASE_URL), {
+    method: "POST",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(BOT_PLAYERS.map(bot => ({ room_id: roomId, ...bot })))
+  });
+  if (!botResponse.ok) throw new Error(`Lobby bot insert failed: ${botResponse.status}`);
 
   const deepLink = `https://t.me/${env.BOT_USERNAME}?startapp=${code}`;
   await sendTelegramMessage(env, message.chat.id,
