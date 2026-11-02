@@ -1,5 +1,6 @@
 import { supabaseRequest } from "./supabase";
 import type { Env } from "./types";
+import { isBotPlayer, makeBotAnswer } from "./bots";
 
 type MiniUser = { id: number; first_name: string; last_name?: string };
 type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number };
@@ -50,6 +51,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`);
     if (answers.length === players.length) {
       await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", updated_at: new Date().toISOString() }) });
+      await castBotVotes(env, room, players);
       await notify(env, code, "voting_started", { round: room.round_number });
     } else {
       await notify(env, code, "answer_received", { count: answers.length, total: players.length });
@@ -140,6 +142,29 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
     room_id: room.id, round_number: round, prompt_id: prompt.id, player_telegram_id: player.telegram_user_id
   }))) });
   await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "answering", round_number: round, updated_at: new Date().toISOString() }) });
+
+  const roundRoom = { ...room, round_number: round };
+  const assignments = await getAssignments(env, roundRoom);
+  const botAnswers = assignments
+    .filter(item => isBotPlayer(Number(item.player_telegram_id)))
+    .map(item => {
+      const seed = [...item.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) + round;
+      return { room_id: room.id, round_number: round, prompt_assignment_id: item.id, author_telegram_id: item.player_telegram_id, answer_text: makeBotAnswer(seed) };
+    });
+  if (botAnswers.length) await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify(botAnswers) });
+}
+
+async function castBotVotes(env: Env, room: Room, players: Player[]): Promise<void> {
+  const assignments = await getAssignments(env, room);
+  const botIds = players.map(p => Number(p.telegram_user_id)).filter(isBotPlayer);
+  if (!botIds.length) return;
+  const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,author_telegram_id`);
+  const votes: Array<{ answer_id: string; voter_telegram_id: number }> = [];
+  for (const botId of botIds) {
+    if (!assignments.some(a => Number(a.player_telegram_id) === botId)) continue;
+    for (const answer of answers) if (Number(answer.author_telegram_id) !== botId) votes.push({ answer_id: answer.id, voter_telegram_id: botId });
+  }
+  if (votes.length) await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify(votes) });
 }
 
 async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promise<void> {
