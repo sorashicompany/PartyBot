@@ -156,7 +156,7 @@ async function advanceExpiredPhase(env: Env, room: Room, players: Player[]): Pro
 }
 
 async function getAssignments(env: Env, room: Room): Promise<Assignment[]> {
-  return supabaseRequest<Assignment[]>(env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_id,player_telegram_id,pair_key,prompt_slot`);
+  return supabaseRequest<Assignment[]>(env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_id,player_telegram_id,pair_key,prompt_slot&order=created_at.asc`);
 }
 
 async function beginRound(env: Env, room: Room, players: Player[], round: number): Promise<void> {
