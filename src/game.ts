@@ -34,7 +34,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (typeof body.customPrompt === "string" && body.customPrompt.trim()) {
       const custom = await supabaseRequest<Array<{id:string}>>(env, `room_custom_prompts?room_id=eq.${room.id}&select=id`);
       if (custom.length >= 50) return json({ error: "Maximum 50 custom prompts" }, 400);
-      const inserted = await supabaseRequest<Prompt[]>(env, "prompts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ prompt_text: body.customPrompt.trim().slice(0,240), locale: "ru", enabled: true }) });
+      const inserted = await supabaseRequest<Prompt[]>(env, "prompts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ prompt_text: body.customPrompt.trim().slice(0,240), locale: "ru", enabled: false }) });
       await supabaseRequest(env, "room_custom_prompts", { method: "POST", body: JSON.stringify({ room_id: room.id, prompt_text: body.customPrompt.trim().slice(0,240), prompt_id: inserted[0]?.id, created_by_telegram_id: user.id }) });
     }
     return json({ ok: true });
@@ -43,11 +43,28 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (Number(room.host_telegram_id) !== user.id) return json({ error: "Only the host can start" }, 403);
     if (room.status !== "lobby") return json({ error: "Game already started" }, 409);
     if (players.length < 4 || players.length > 10) return json({ error: "A game requires 4–10 players" }, 409);
+    if (room.custom_prompts_enabled) {
+      const deadline = new Date(Date.now() + 120000).toISOString();
+      await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "custom_writing", phase_deadline_at: deadline, updated_at: new Date().toISOString() }) });
+      await notify(env, code, "custom_writing", { round: 1 });
+      return json({ ok: true, status: "custom_writing", round: 1 });
+    }
     await beginRound(env, room, players, 1);
     await notify(env, code, "game_started", { round: 1 });
     return json({ ok: true, status: "answering", round: 1 });
   }
 
+  if (url.pathname === "/api/game/custom-prompts" && request.method === "POST") {
+    if (room.status !== "custom_writing") return json({ error: "Custom prompt phase is closed" }, 409);
+    const values = Array.isArray(body.prompts) ? body.prompts.map(v => String(v || "").trim()) : [];
+    if (values.length !== 2 || values.some(v => v.length < 5 || v.length > 240)) return json({ error: "Enter exactly two questions, each 5–240 characters" }, 400);
+    const existing = await supabaseRequest<Array<{id:string}>>(env, `room_custom_prompts?room_id=eq.${room.id}&created_by_telegram_id=eq.${user.id}&select=id`);
+    if (existing.length >= 2) return json({ error: "You already submitted two questions" }, 409);
+    const prompts = await supabaseRequest<Prompt[]>(env, "prompts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(values.map(prompt_text => ({ prompt_text, locale: "ru", enabled: false }))) });
+    if (prompts.length !== 2) return json({ error: "Could not save both questions" }, 500);
+    await supabaseRequest(env, "room_custom_prompts", { method: "POST", body: JSON.stringify(prompts.map(p => ({ room_id: room.id, prompt_text: p.prompt_text, prompt_id: p.id, created_by_telegram_id: user.id }))) });
+    return json({ ok: true });
+  }
   if (url.pathname === "/api/game/answer" && request.method === "POST") {
     const answerText = String(body.text || "").trim().toLocaleLowerCase("ru-RU");
     if (room.status !== "answering") return json({ error: "Answer phase is closed" }, 409);
@@ -127,7 +144,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
   const names = Object.fromEntries(players.map(p => [String(p.telegram_user_id), p.display_name]));
   return {
-    code: room.code, status: room.status, round: room.round_number, deadline: room.phase_deadline_at || null, votingPromptIndex: room.voting_prompt_index || 0, customPromptsEnabled: Boolean((room as Room & {custom_prompts_enabled?:boolean}).custom_prompts_enabled),
+    code: room.code, status: room.status, round: room.round_number, deadline: room.phase_deadline_at || null, customPromptCount: room.status === "custom_writing" ? await (async () => (await supabaseRequest<Array<{id:string}>>(env, `room_custom_prompts?room_id=eq.${room.id}&created_by_telegram_id=eq.${userId}&select=id`)).length)() : 0, votingPromptIndex: room.voting_prompt_index || 0, customPromptsEnabled: Boolean((room as Room & {custom_prompts_enabled?:boolean}).custom_prompts_enabled),
     players: players.map(p => ({ name: p.display_name, score: p.score, isHost: Number(room.host_telegram_id) === Number(p.telegram_user_id) })),
     prompts: (room.round_number === 3 ? ownAssignments : ownAssignments.filter(a => !myAnswers.some(x => x.prompt_assignment_id === a.id)).sort((a,b) => (a.prompt_slot || 1) - (b.prompt_slot || 1)).slice(0,1)).map(a => ({ assignmentId: a.id, promptId: a.prompt_id, text: prompts.find(p => p.id === a.prompt_id)?.prompt_text || "", answered: myAnswers.some(x => x.prompt_assignment_id === a.id), slot: a.prompt_slot || 1 })),
     promptLabels: Object.fromEntries(prompts.map(p => [p.id, p.prompt_text])),
@@ -140,6 +157,11 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
 
 async function advanceExpiredPhase(env: Env, room: Room, players: Player[]): Promise<Room> {
   if (!room.phase_deadline_at || Date.now() < Date.parse(room.phase_deadline_at)) return room;
+  if (room.status === "custom_writing") {
+    await beginRound(env, room, players, 1);
+    await notify(env, room.code, "game_started", { round: 1 });
+    return { ...room, status: "answering", phase_deadline_at: new Date(Date.now() + 60000).toISOString() };
+  }
   if (room.status === "answering") {
     const deadline = new Date(Date.now() + 10000).toISOString();
     await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", phase_deadline_at: deadline, updated_at: new Date().toISOString() }) });
@@ -148,6 +170,14 @@ async function advanceExpiredPhase(env: Env, room: Room, players: Player[]): Pro
     return { ...room, status: "voting", phase_deadline_at: deadline };
   }
   if (room.status === "voting") {
+    const assignments = await getAssignments(env, room);
+    const promptCount = new Set(assignments.map(a => a.prompt_id)).size;
+    const nextIndex = Number(room.voting_prompt_index || 0) + 1;
+    if (nextIndex < promptCount) {
+      const deadline = new Date(Date.now() + 20000).toISOString();
+      await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ voting_prompt_index: nextIndex, phase_deadline_at: deadline, updated_at: new Date().toISOString() }) });
+      return { ...room, voting_prompt_index: nextIndex, phase_deadline_at: deadline };
+    }
     await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "round_results", phase_deadline_at: null, updated_at: new Date().toISOString() }) });
     await notify(env, room.code, "round_results", { round: room.round_number });
     return { ...room, status: "round_results", phase_deadline_at: null };
