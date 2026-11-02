@@ -20,6 +20,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   const room = rooms[0];
   if (!room) return json({ error: "Room not found" }, 404);
   const players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name,score&order=joined_at.asc`);
+  room = await advanceExpiredPhase(env, room, players);
   if (!players.some(player => Number(player.telegram_user_id) === user.id)) return json({ error: "Not a room member" }, 403);
 
   if (url.pathname === "/api/game/state" && request.method === "GET") {
@@ -65,7 +66,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     const assignments = await getAssignments(env, room);
     const ownAssignment = assignments.find(item => Number(item.player_telegram_id) === user.id);
     if (!ownAssignment) return json({ error: "No prompt assigned" }, 409);
-    const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_assignment_id,author_telegram_id,answer_text`);
+    const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_assignment_id,prompt_id,author_telegram_id,answer_text,wager`);
     const target = answers.find(answer => answer.id === answerId);
     if (!target || target.prompt_assignment_id === ownAssignment.id || Number(target.author_telegram_id) === user.id) {
       return json({ error: "You cannot vote for this answer" }, 400);
@@ -121,6 +122,23 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
     votesCast: ownVoteTargets.length, votesNeeded: room.round_number === 3 ? 1 : 2,
     isHost: Number(room.host_telegram_id) === userId
   };
+}
+
+async function advanceExpiredPhase(env: Env, room: Room, players: Player[]): Promise<Room> {
+  if (!room.phase_deadline_at || Date.now() < Date.parse(room.phase_deadline_at)) return room;
+  if (room.status === "answering") {
+    const deadline = new Date(Date.now() + 10000).toISOString();
+    await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", phase_deadline_at: deadline, updated_at: new Date().toISOString() }) });
+    await castBotVotes(env, room, players);
+    await notify(env, room.code, "voting_started", { round: room.round_number });
+    return { ...room, status: "voting", phase_deadline_at: deadline };
+  }
+  if (room.status === "voting") {
+    await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "round_results", phase_deadline_at: null, updated_at: new Date().toISOString() }) });
+    await notify(env, room.code, "round_results", { round: room.round_number });
+    return { ...room, status: "round_results", phase_deadline_at: null };
+  }
+  return room;
 }
 
 async function getAssignments(env: Env, room: Room): Promise<Assignment[]> {
