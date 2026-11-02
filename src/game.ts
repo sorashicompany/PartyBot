@@ -3,7 +3,7 @@ import type { Env } from "./types";
 import { isBotPlayer, makeBotAnswer } from "./bots";
 
 type MiniUser = { id: number; first_name: string; last_name?: string };
-type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number; phase_deadline_at?: string | null };
+type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number; phase_deadline_at?: string | null; voting_prompt_index?: number };
 type Player = { telegram_user_id: number; display_name: string; score: number };
 type Prompt = { id: string; prompt_text: string };
 type Assignment = { id: string; prompt_id: string; player_telegram_id: number; pair_key?: string | null; prompt_slot?: number };
@@ -16,7 +16,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   const code = String(body.code || url.searchParams.get("code") || "").toUpperCase();
   if (!/^[A-HJ-NP-Z2-9]{5}$/.test(code)) return json({ error: "Invalid room code" }, 400);
 
-  const rooms = await supabaseRequest<Room[]>(env, `rooms?code=eq.${code}&select=id,code,host_telegram_id,status,round_number,phase_deadline_at&limit=1`);
+  const rooms = await supabaseRequest<Room[]>(env, `rooms?code=eq.${code}&select=id,code,host_telegram_id,status,round_number,phase_deadline_at,voting_prompt_index,custom_prompts_enabled&limit=1`);
   let room = rooms[0];
   if (!room) return json({ error: "Room not found" }, 404);
   const players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name,score&order=joined_at.asc`);
@@ -27,7 +27,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     return json(await getState(env, room, players, user.id));
   }
 
-  if (url.pathname === "/api/game/start" && request.method === "POST") {
+  if (url.pathname === "/api/game/settings" && request.method === "POST") {\n    if (Number(room.host_telegram_id) !== user.id) return json({ error: "Only the host can change game settings" }, 403);\n    if (room.status !== "lobby") return json({ error: "Settings are locked after the game starts" }, 409);\n    if (typeof body.customEnabled === "boolean") await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ custom_prompts_enabled: body.customEnabled }) });\n    if (typeof body.customPrompt === "string" && body.customPrompt.trim()) {\n      const custom = await supabaseRequest<Array<{id:string}>>(env, `room_custom_prompts?room_id=eq.${room.id}&select=id`);\n      if (custom.length >= 50) return json({ error: "Maximum 50 custom prompts" }, 400);\n      await supabaseRequest(env, "room_custom_prompts", { method: "POST", body: JSON.stringify({ room_id: room.id, prompt_text: body.customPrompt.trim().slice(0,240), created_by_telegram_id: user.id }) });\n    }\n    return json({ ok: true });\n  }\n  if (url.pathname === "/api/game/start" && request.method === "POST") {
     if (Number(room.host_telegram_id) !== user.id) return json({ error: "Only the host can start" }, 403);
     if (room.status !== "lobby") return json({ error: "Game already started" }, 409);
     if (players.length < 4 || players.length > 10) return json({ error: "A game requires 4–10 players" }, 409);
@@ -51,7 +51,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     }) });
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`);
     if (answers.length >= (room.round_number === 3 ? players.length : players.length * 2)) {
-      await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", phase_deadline_at: new Date(Date.now() + 10000).toISOString(), updated_at: new Date().toISOString() }) });
+      await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", voting_prompt_index: 0, phase_deadline_at: new Date(Date.now() + 20000).toISOString(), updated_at: new Date().toISOString() }) });
       await castBotVotes(env, room, players);
       await notify(env, code, "voting_started", { round: room.round_number });
     } else {
@@ -76,8 +76,8 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
     const allVotes = await supabaseRequest<Vote[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=votes(answer_id,voter_telegram_id)`);
     const voteCount = allVotes.reduce((sum, answer) => sum + ((answer as unknown as { votes?: Vote[] }).votes?.length || 0), 0);
-    const expected = (room.round_number === 3 ? 1 : players.length) * Math.max(0, players.length - 2);
-    if (voteCount >= expected) {
+    const expected = 0;
+    if (false) {
       await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "round_results", phase_deadline_at: null, updated_at: new Date().toISOString() }) });
       await notify(env, code, "round_results", { round: room.round_number });
     }
@@ -115,7 +115,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
   const names = Object.fromEntries(players.map(p => [String(p.telegram_user_id), p.display_name]));
   return {
-    code: room.code, status: room.status, round: room.round_number, deadline: room.phase_deadline_at || null,
+    code: room.code, status: room.status, round: room.round_number, deadline: room.phase_deadline_at || null, votingPromptIndex: room.voting_prompt_index || 0, customPromptsEnabled: Boolean((room as Room & {custom_prompts_enabled?:boolean}).custom_prompts_enabled),
     players: players.map(p => ({ name: p.display_name, score: p.score, isHost: Number(room.host_telegram_id) === Number(p.telegram_user_id) })),
     prompts: ownAssignments.map(a => ({ assignmentId: a.id, promptId: a.prompt_id, text: prompts.find(p => p.id === a.prompt_id)?.prompt_text || "", answered: myAnswers.some(x => x.prompt_assignment_id === a.id) })),
     promptLabels: Object.fromEntries(prompts.map(p => [p.id, p.prompt_text])),
@@ -169,7 +169,7 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
     }
   }
   await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
-  await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "answering", round_number: round, phase_deadline_at: new Date(Date.now() + 60000).toISOString(), updated_at: new Date().toISOString() }) });
+  await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "answering", round_number: round, voting_prompt_index: 0, phase_deadline_at: new Date(Date.now() + 60000).toISOString(), updated_at: new Date().toISOString() }) });
   const assignments = await getAssignments(env, { ...room, round_number: round });
   const botAnswers = assignments.filter(item => isBotPlayer(Number(item.player_telegram_id))).map(item => {
     const seed = [...item.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) + round;
