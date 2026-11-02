@@ -1,8 +1,5 @@
 node_modules/
-.wrangler/
-.dev.vars
+.project_id
+.github_repo
 .env
 .env.*
-dist/
-coverage/
-.DS_Store

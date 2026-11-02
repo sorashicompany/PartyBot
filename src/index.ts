@@ -21,6 +21,37 @@ export default {
     try {
       if (url.pathname === "/health") return Response.json({ ok: true, name: "SorashiPartyFunBot" });
 
+      if (url.pathname === "/api/profile/result" && request.method === "POST") {
+        const user = await authenticateMiniApp(request, env.BOT_TOKEN).catch(() => null);
+        if (!user) return Response.json({ error: "Unauthorized Telegram session" }, { status: 401, headers: corsHeaders });
+        const body = await request.json() as { score?: number; place?: number };
+        const score = Number(body.score);
+        const place = Number(body.place);
+        if (!Number.isInteger(score) || score < 0 || score > 100000 || !Number.isInteger(place) || place < 0 || place > 8) {
+          return Response.json({ error: "Invalid game result" }, { status: 400, headers: corsHeaders });
+        }
+        await supabaseRequest(env, "rpc/record_party_game_result", {
+          method: "POST",
+          body: JSON.stringify({
+            p_telegram_user_id: user.id,
+            p_display_name: user.first_name,
+            p_score: score,
+            p_place: place,
+          }),
+        });
+        return Response.json({ ok: true }, { headers: corsHeaders });
+      }
+
+      if (url.pathname === "/api/profile" && request.method === "GET") {
+        const user = await authenticateMiniApp(request, env.BOT_TOKEN).catch(() => null);
+        if (!user) return Response.json({ error: "Unauthorized Telegram session" }, { status: 401, headers: corsHeaders });
+        const profiles = await supabaseRequest<Array<{ display_name: string; games_played: number; total_score: number; best_place: number | null }>>(
+          env,
+          `party_profiles?telegram_user_id=eq.${user.id}&select=display_name,games_played,total_score,best_place&limit=1`,
+        );
+        return Response.json({ profile: profiles[0] ?? null }, { headers: corsHeaders });
+      }
+
       if (url.pathname === "/telegram/webhook" && request.method === "POST") {
         const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
         if (!env.TELEGRAM_WEBHOOK_SECRET || !secret || !timingSafeEqual(secret, env.TELEGRAM_WEBHOOK_SECRET)) return new Response("Unauthorized", { status: 401 });

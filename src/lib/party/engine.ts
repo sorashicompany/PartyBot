@@ -6,7 +6,7 @@ import {
   GENERIC,
   SAFETY,
   type Prompt,
-} from "./party-content";
+} from "./content";
 
 export const TIMING = {
   customMs: 70_000,
