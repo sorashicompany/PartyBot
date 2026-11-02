@@ -1,6 +1,6 @@
 import { supabaseRequest } from "./supabase";
 import type { Env } from "./types";
-import { isBotPlayer, makeBotAnswer } from "./bots";
+import { isBotPlayer, makeBotAnswer, makeBotPrompt } from "./bots";
 
 type MiniUser = { id: number; first_name: string; last_name?: string };
 type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number; phase_deadline_at?: string | null; voting_prompt_index?: number; custom_prompts_enabled?: boolean };
@@ -46,6 +46,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (room.custom_prompts_enabled) {
       const deadline = new Date(Date.now() + 120000).toISOString();
       await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "custom_writing", phase_deadline_at: deadline, updated_at: new Date().toISOString() }) });
+      await createBotCustomPrompts(env, room, players);
       await notify(env, code, "custom_writing", { round: 1 });
       return json({ ok: true, status: "custom_writing", round: 1 });
     }
@@ -222,6 +223,36 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
     return { room_id: room.id, round_number: round, prompt_assignment_id: item.id, prompt_id: item.prompt_id, author_telegram_id: item.player_telegram_id, answer_text: makeBotAnswer(seed).toLocaleLowerCase("ru-RU"), wager: 0 };
   });
   if (botAnswers.length) await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify(botAnswers) });
+}
+
+async function createBotCustomPrompts(env: Env, room: Room, players: Player[]): Promise<void> {
+  const bots = players.filter(player => isBotPlayer(Number(player.telegram_user_id)));
+  if (!bots.length) return;
+  const existing = await supabaseRequest<Array<{ created_by_telegram_id: number }>>(
+    env,
+    `room_custom_prompts?room_id=eq.${room.id}&select=created_by_telegram_id`
+  );
+  const submitted = new Set(existing.map(row => Number(row.created_by_telegram_id)));
+  for (const bot of bots) {
+    if (submitted.has(Number(bot.telegram_user_id))) continue;
+    const seed = Math.abs(Number(bot.telegram_user_id));
+    const texts = [makeBotPrompt(seed), makeBotPrompt(seed + 3)];
+    const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(texts.map(prompt_text => ({ prompt_text, locale: "ru", enabled: false })))
+    });
+    if (inserted.length !== 2) throw new Error("Could not create bot custom prompts");
+    await supabaseRequest(env, "room_custom_prompts", {
+      method: "POST",
+      body: JSON.stringify(inserted.map(prompt => ({
+        room_id: room.id,
+        prompt_text: prompt.prompt_text,
+        prompt_id: prompt.id,
+        created_by_telegram_id: bot.telegram_user_id
+      })))
+    });
+  }
 }
 
 async function castBotVotes(env: Env, room: Room, players: Player[]): Promise<void> {
