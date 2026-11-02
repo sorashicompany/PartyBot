@@ -2,6 +2,7 @@ import { GameRoom } from "./game-room";
 import { handleTelegramUpdate } from "./telegram";
 import { supabaseRequest } from "./supabase";
 import { createRoomTicket } from "./tickets";
+import { handleGameRequest } from "./game";
 import type { Env, TelegramUpdate } from "./types";
 
 export { GameRoom };
@@ -59,7 +60,13 @@ export default {
         return stub.fetch(request);
       }
 
-      if (url.pathname.startsWith("/api/")) return Response.json({ error: "Not implemented" }, { status: 404, headers: corsHeaders });
+      if (url.pathname.startsWith("/api/game/")) {
+        const user = await authenticateMiniApp(request, env.BOT_TOKEN).catch(() => null);
+        if (!user) return Response.json({ error: "Unauthorized Telegram session" }, { status: 401, headers: corsHeaders });
+        return handleGameRequest(request, env, user);
+      }
+
+      if (url.pathname.startsWith("/api/")) return Response.json({ error: "Not found" }, { status: 404, headers: corsHeaders });
       return env.ASSETS.fetch(request);
     } catch (error) {
       console.error(JSON.stringify({ level: "error", message: error instanceof Error ? error.message : "unknown" }));
