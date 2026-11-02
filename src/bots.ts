@@ -1,3 +1,5 @@
+import { PARTY_BOT_QUESTIONS, PARTY_GENERIC_ANSWERS, partyReplyForPrompt } from "./party-content";
+
 export const BOT_PLAYERS = [
   { telegram_user_id: -900000001, display_name: "🤖 Бот Макс" },
   { telegram_user_id: -900000002, display_name: "🤖 Бот Луна" },
@@ -8,41 +10,11 @@ export function isBotPlayer(telegramUserId: number): boolean {
   return telegramUserId <= -900000001 && telegramUserId >= -900000003;
 }
 
-const ANSWERS = [
-  "Это было в техническом задании мелким шрифтом.",
-  "Спросите у голубя, он здесь главный.",
-  "Я бы объяснил, но закончился Wi-Fi.",
-  "План был хороший. Исполнитель — нет.",
-  "Так решила комиссия по странным решениям.",
-  "Нужно просто добавить больше блёсток.",
-  "Это не баг, а секретная функция.",
-  "Я видел это во сне, и там всё работало.",
-  "Главное — сохранять серьёзное лицо.",
-  "Поздно. Оно уже получило собственный паспорт.",
-  "Потому что обычный вариант был слишком скучным.",
-  "Трижды проверил. Четвёртый раз стало хуже.",
-  "Всё началось с безобидного бутерброда.",
-  "Не задавайте вопросы, и никто не пострадает.",
-  "Я голосовал против, но меня не слушали."
-];
-
-const PROMPTS = [
-  "Какой самый странный предмет можно найти в кармане у президента?",
-  "Что точно не стоит говорить на первом свидании?",
-  "Какое новое правило нужно срочно ввести в офисе?",
-  "Что может испортить даже самый идеальный отпуск?",
-  "Как называется самый бесполезный супергерой?",
-  "Что скрывают инструкции к обычной микроволновке?",
-  "Какой подарок гарантированно удивит соседа?",
-  "Что написать на табличке у машины времени?",
-  "Какой конкурс нужно добавить в Олимпийские игры?",
-  "Что лучше всего объясняет исчезновение всех носков?"
-];
-
-export function makeBotAnswer(seed: number): string {
-  return ANSWERS[Math.abs(seed) % ANSWERS.length];
+/** A short, prompt-aware reply from the Sorashi Party question deck. */
+export function makeBotAnswer(seed: number, promptText?: string): string {
+  return partyReplyForPrompt(seed, promptText) || PARTY_GENERIC_ANSWERS[Math.abs(seed) % PARTY_GENERIC_ANSWERS.length];
 }
 
 export function makeBotPrompt(seed: number): string {
-  return PROMPTS[Math.abs(seed) % PROMPTS.length];
+  return PARTY_BOT_QUESTIONS[Math.abs(seed) % PARTY_BOT_QUESTIONS.length];
 }
