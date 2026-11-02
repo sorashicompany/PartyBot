@@ -165,11 +165,14 @@ async function castBotVotes(env: Env, room: Room, players: Player[]): Promise<vo
   const assignments = await getAssignments(env, room);
   const botIds = players.map(p => Number(p.telegram_user_id)).filter(isBotPlayer);
   if (!botIds.length) return;
-  const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,author_telegram_id`);
-  const votes: Array<{ answer_id: string; voter_telegram_id: number }> = [];
+  const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_id,author_telegram_id`);
+  const votes: Array<{ answer_id: string; prompt_id: string; voter_telegram_id: number }> = [];
   for (const botId of botIds) {
-    if (!assignments.some(a => Number(a.player_telegram_id) === botId)) continue;
-    for (const answer of answers) if (Number(answer.author_telegram_id) !== botId) votes.push({ answer_id: answer.id, voter_telegram_id: botId });
+    const prompts = [...new Set(assignments.filter(a => Number(a.player_telegram_id) === botId).map(a => a.prompt_id))];
+    for (const promptId of prompts) {
+      const options = answers.filter(a => a.prompt_id === promptId && Number(a.author_telegram_id) !== botId);
+      if (options.length) votes.push({ answer_id: options[randomIndex(options.length)].id, prompt_id: promptId, voter_telegram_id: botId });
+    }
   }
   if (votes.length) await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify(votes) });
 }
