@@ -23,6 +23,6 @@
     ]
   },
   "exports": {
-    "GameRoom": { "type": "durable-object", "storage": "legacy-kv" }
+    "GameRoom": { "type": "durable-object", "storage": "sqlite" }
   }
 }
