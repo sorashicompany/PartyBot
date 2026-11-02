@@ -3,7 +3,7 @@ import type { Env } from "./types";
 import { isBotPlayer, makeBotAnswer } from "./bots";
 
 type MiniUser = { id: number; first_name: string; last_name?: string };
-type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number; phase_deadline_at?: string | null; voting_prompt_index?: number };
+type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number; phase_deadline_at?: string | null; voting_prompt_index?: number; custom_prompts_enabled?: boolean };
 type Player = { telegram_user_id: number; display_name: string; score: number };
 type Prompt = { id: string; prompt_text: string };
 type Assignment = { id: string; prompt_id: string; player_telegram_id: number; pair_key?: string | null; prompt_slot?: number };
@@ -27,7 +27,18 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     return json(await getState(env, room, players, user.id));
   }
 
-  if (url.pathname === "/api/game/settings" && request.method === "POST") {\n    if (Number(room.host_telegram_id) !== user.id) return json({ error: "Only the host can change game settings" }, 403);\n    if (room.status !== "lobby") return json({ error: "Settings are locked after the game starts" }, 409);\n    if (typeof body.customEnabled === "boolean") await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ custom_prompts_enabled: body.customEnabled }) });\n    if (typeof body.customPrompt === "string" && body.customPrompt.trim()) {\n      const custom = await supabaseRequest<Array<{id:string}>>(env, `room_custom_prompts?room_id=eq.${room.id}&select=id`);\n      if (custom.length >= 50) return json({ error: "Maximum 50 custom prompts" }, 400);\n      await supabaseRequest(env, "room_custom_prompts", { method: "POST", body: JSON.stringify({ room_id: room.id, prompt_text: body.customPrompt.trim().slice(0,240), created_by_telegram_id: user.id }) });\n    }\n    return json({ ok: true });\n  }\n  if (url.pathname === "/api/game/start" && request.method === "POST") {
+  if (url.pathname === "/api/game/settings" && request.method === "POST") {
+    if (Number(room.host_telegram_id) !== user.id) return json({ error: "Only the host can change game settings" }, 403);
+    if (room.status !== "lobby") return json({ error: "Settings are locked after the game starts" }, 409);
+    if (typeof body.customEnabled === "boolean") await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ custom_prompts_enabled: body.customEnabled }) });
+    if (typeof body.customPrompt === "string" && body.customPrompt.trim()) {
+      const custom = await supabaseRequest<Array<{id:string}>>(env, `room_custom_prompts?room_id=eq.${room.id}&select=id`);
+      if (custom.length >= 50) return json({ error: "Maximum 50 custom prompts" }, 400);
+      await supabaseRequest(env, "room_custom_prompts", { method: "POST", body: JSON.stringify({ room_id: room.id, prompt_text: body.customPrompt.trim().slice(0,240), created_by_telegram_id: user.id }) });
+    }
+    return json({ ok: true });
+  }
+  if (url.pathname === "/api/game/start" && request.method === "POST") {
     if (Number(room.host_telegram_id) !== user.id) return json({ error: "Only the host can start" }, 403);
     if (room.status !== "lobby") return json({ error: "Game already started" }, 409);
     if (players.length < 4 || players.length > 10) return json({ error: "A game requires 4–10 players" }, 409);
@@ -117,8 +128,9 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   return {
     code: room.code, status: room.status, round: room.round_number, deadline: room.phase_deadline_at || null, votingPromptIndex: room.voting_prompt_index || 0, customPromptsEnabled: Boolean((room as Room & {custom_prompts_enabled?:boolean}).custom_prompts_enabled),
     players: players.map(p => ({ name: p.display_name, score: p.score, isHost: Number(room.host_telegram_id) === Number(p.telegram_user_id) })),
-    prompts: ownAssignments.map(a => ({ assignmentId: a.id, promptId: a.prompt_id, text: prompts.find(p => p.id === a.prompt_id)?.prompt_text || "", answered: myAnswers.some(x => x.prompt_assignment_id === a.id) })),
+    prompts: ownAssignments.filter(a => room.round_number === 3 || !ownAssignments.some(prev => prev.prompt_slot === 1 && myAnswers.some(x => x.prompt_assignment_id === prev.id)) || a.prompt_slot === 2).map(a => ({ assignmentId: a.id, promptId: a.prompt_id, text: prompts.find(p => p.id === a.prompt_id)?.prompt_text || "", answered: myAnswers.some(x => x.prompt_assignment_id === a.id), slot: a.prompt_slot || 1 })),
     promptLabels: Object.fromEntries(prompts.map(p => [p.id, p.prompt_text])),
+    activeVotingPromptId: [...new Set(assignments.map(a => a.prompt_id))][Number(room.voting_prompt_index || 0)] || null,
     answers: submitted.map(a => ({ id: a.id, promptId: a.prompt_id, text: a.answer_text, name: room.status === "round_results" || room.status === "finished" ? names[String(a.author_telegram_id)] : undefined, own: Number(a.author_telegram_id) === userId, votes: voteCounts[a.id] || 0, voted: ownVoteTargets.includes(a.id), wager: a.wager || 0 })),
     votesCast: ownVoteTargets.length, votesNeeded: room.round_number === 3 ? 1 : 2,
     isHost: Number(room.host_telegram_id) === userId
@@ -147,11 +159,12 @@ async function getAssignments(env: Env, room: Room): Promise<Assignment[]> {
 }
 
 async function beginRound(env: Env, room: Room, players: Player[], round: number): Promise<void> {
+  const customPrompts = room.custom_prompts_enabled ? await supabaseRequest<Prompt[]>(env, `room_custom_prompts?room_id=eq.${room.id}&select=id,prompt_text`) : [];
   const used = await supabaseRequest<Array<{ prompt_id: string }>>(env, `round_prompts?room_id=eq.${room.id}&select=prompt_id`);
   const usedIds = [...new Set(used.map(row => row.prompt_id))];
-  let available = await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
+  let available = customPrompts.length ? customPrompts : await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
   available = available.filter(prompt => !usedIds.includes(prompt.id));
-  if (available.length < players.length) available = await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
+  if (available.length < players.length && !customPrompts.length) available = await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
   if (!available.length) throw new Error("No enabled prompts available");
   available = [...available].sort(() => Math.random() - 0.5);
   const shuffled = [...players].sort(() => Math.random() - 0.5);
