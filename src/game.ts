@@ -34,7 +34,8 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (typeof body.customPrompt === "string" && body.customPrompt.trim()) {
       const custom = await supabaseRequest<Array<{id:string}>>(env, `room_custom_prompts?room_id=eq.${room.id}&select=id`);
       if (custom.length >= 50) return json({ error: "Maximum 50 custom prompts" }, 400);
-      await supabaseRequest(env, "room_custom_prompts", { method: "POST", body: JSON.stringify({ room_id: room.id, prompt_text: body.customPrompt.trim().slice(0,240), created_by_telegram_id: user.id }) });
+      const inserted = await supabaseRequest<Prompt[]>(env, "prompts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ prompt_text: body.customPrompt.trim().slice(0,240), locale: "ru", enabled: true }) });
+      await supabaseRequest(env, "room_custom_prompts", { method: "POST", body: JSON.stringify({ room_id: room.id, prompt_text: body.customPrompt.trim().slice(0,240), prompt_id: inserted[0]?.id, created_by_telegram_id: user.id }) });
     }
     return json({ ok: true });
   }
@@ -159,7 +160,9 @@ async function getAssignments(env: Env, room: Room): Promise<Assignment[]> {
 }
 
 async function beginRound(env: Env, room: Room, players: Player[], round: number): Promise<void> {
-  const customPrompts = room.custom_prompts_enabled ? await supabaseRequest<Prompt[]>(env, `room_custom_prompts?room_id=eq.${room.id}&select=id,prompt_text`) : [];
+  const customRows = room.custom_prompts_enabled ? await supabaseRequest<Array<{prompt_id:string}>>(env, `room_custom_prompts?room_id=eq.${room.id}&select=prompt_id`) : [];
+  const customIds = customRows.map(row => row.prompt_id).filter(Boolean);
+  const customPrompts = customIds.length ? await supabaseRequest<Prompt[]>(env, `prompts?id=in.(${customIds.join(",")})&select=id,prompt_text`) : [];
   const used = await supabaseRequest<Array<{ prompt_id: string }>>(env, `round_prompts?room_id=eq.${room.id}&select=prompt_id`);
   const usedIds = [...new Set(used.map(row => row.prompt_id))];
   let available = customPrompts.length ? customPrompts : await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
