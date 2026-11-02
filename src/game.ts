@@ -167,7 +167,7 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
   const usedIds = [...new Set(used.map(row => row.prompt_id))];
   let available = customPrompts.length ? customPrompts : await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
   available = available.filter(prompt => !usedIds.includes(prompt.id));
-  if (available.length < players.length && !customPrompts.length) available = await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
+  if (available.length < players.length) available = customPrompts.length ? [...customPrompts] : await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
   if (!available.length) throw new Error("No enabled prompts available");
   available = [...available].sort(() => Math.random() - 0.5);
   const shuffled = [...players].sort(() => Math.random() - 0.5);
