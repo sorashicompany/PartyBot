@@ -94,7 +94,8 @@
     const timer=document.querySelector('#phaseTimer');
     if(s.deadline){const left=Math.max(0,Math.ceil((Date.parse(s.deadline)-Date.now())/1000));timer.textContent='Осталось: '+left+' сек.';}else timer.textContent='';
   }
-  setInterval(()=>{if(lastState?.deadline){const left=Math.max(0,Math.ceil((Date.parse(lastState.deadline)-Date.now())/1000));document.querySelector("#phaseTimer").textContent="Осталось: "+left+" сек.";}},1000);\n  setInterval(()=>{if(roomCode)refresh().catch(()=>{})},2000);\n  async function runAction(path,body){try{await api(path,body);await refresh()}catch(e){alert(e.message)}}
+  setInterval(()=>{if(lastState?.deadline){const left=Math.max(0,Math.ceil((Date.parse(lastState.deadline)-Date.now())/1000));document.querySelector("#phaseTimer").textContent="Осталось: "+left+" сек.";}},1000);
+  setInterval(()=>{if(roomCode)refresh().catch(()=>{})},2000);\n  async function runAction(path,body){try{await api(path,body);await refresh()}catch(e){alert(e.message)}}
   document.querySelector('#join').addEventListener('click',join);
   if(input.value)join();
 </script></body></html>
