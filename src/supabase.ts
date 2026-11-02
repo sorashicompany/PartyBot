@@ -5,6 +5,7 @@ export async function supabaseRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Supabase server credentials are not configured");
   const response = await fetch(new URL(`/rest/v1/${path}`, env.SUPABASE_URL), {
     ...init,
     headers: {
