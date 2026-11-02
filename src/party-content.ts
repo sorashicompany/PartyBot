@@ -166,3 +166,18 @@ export const BUILTINS: Prompt[] = [
     replies: ["зайчик и налоговая", "день открытых обид", "клоун без обратного билета", "улыбайся, это отчёт"],
   },
 ];
+
+
+// Compatibility exports used by the Telegram bot layer.
+export const PARTY_BOT_NAMES = BOT_NAMES;
+export const PARTY_EXAMPLES = EXAMPLES;
+export const PARTY_SAFETY_ANSWERS = SAFETY;
+export const PARTY_GENERIC_ANSWERS = GENERIC;
+export const PARTY_BOT_QUESTIONS = BOT_QUESTIONS;
+
+export function partyReplyForPrompt(seed: number, promptText?: string): string {
+  const key = (promptText || "").trim().toLocaleLowerCase("ru-RU");
+  const prompt = BUILTINS.find((item) => item.text.toLocaleLowerCase("ru-RU") === key);
+  const pool = prompt?.replies.length ? prompt.replies : GENERIC;
+  return pool[Math.abs(seed) % pool.length] || GENERIC[0]!;
+}
