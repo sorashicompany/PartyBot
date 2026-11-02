@@ -45,3 +45,16 @@ The workflow deploys `https://sorashi-party-fun-bot.sorashithegod.workers.dev`, 
 
 ## Not yet implemented
 Round timers, two prompts per player per round, moderation/reporting, reconnect state sync beyond refresh, race-safe round transitions, automated integration tests and production deployment. Treat this as an MVP development build, not a public launch.
+
+
+## Sorashi Party game port
+
+The gameplay content and visual direction from the private `sorashicompany/partygame2` project have been adapted for the Telegram Mini App:
+
+- Imported the 22-question Russian prompt deck and the bot-only custom question pool.
+- Bots now choose a punchline associated with the prompt when a matching authored reply exists, falling back to the shared answer pool for user-written questions.
+- The Mini App uses the source project's Manrope / Unbounded typography, dark plum surfaces, lime accents, coral contrast and responsive answer cards.
+- The prompt seed is additive and idempotent: `supabase/migrations/20261102170000_import_partygame2_prompt_deck.sql`.
+
+The original app's React/TanStack/Vercel shell, Grok preview bridge, Better Auth, PGlite/Neon adapters and browser-only WebRTC signaling were not copied. They are platform-specific and conflict with this bot's Telegram initData authentication, Cloudflare Workers, Durable Objects and Supabase persistence. The game flow remains server-authoritative: clients submit actions, while the Worker validates them and stores state in Supabase.
+
