@@ -22,7 +22,17 @@ Telegram party game. First mode: **Quiplash**.
 - `ROOM_TICKET_SECRET` — random secret used to sign short-lived WebSocket tickets.
 - `SUPABASE_SERVICE_ROLE_KEY` — server-only Supabase key. Never expose it in browser code.
 
-Set `BOT_USERNAME` as a Worker variable or secret. Configure the Telegram webhook at `https://<worker-domain>/telegram/webhook`, then set the Mini App URL in BotFather.
+Set `BOT_USERNAME` as a Worker secret. The GitHub Actions workflow deploys automatically after typecheck when all required repository secrets are present. Configure these GitHub Actions secrets in **Settings → Secrets and variables → Actions**:
+
+- `CLOUDFLARE_API_TOKEN` — API token with Workers Scripts edit permission.
+- `CLOUDFLARE_ACCOUNT_ID` — Cloudflare account ID.
+- `BOT_TOKEN` — Telegram bot token from BotFather.
+- `BOT_USERNAME` — bot username without `@`.
+- `TELEGRAM_WEBHOOK_SECRET` — random 32-byte hex string.
+- `ROOM_TICKET_SECRET` — a different random 32-byte hex string.
+- `SUPABASE_SERVICE_ROLE_KEY` — server-only key from the Supabase project's API settings.
+
+The workflow deploys `https://sorashi-party-fun-bot.sorashithegod.workers.dev`, registers the Telegram webhook and installs the `/party` command. After deployment, set the bot's Main Mini App URL to `https://sorashi-party-fun-bot.sorashithegod.workers.dev` in BotFather. Do not paste any of these credentials into chat or commit them to the repository.
 
 ## Implemented game flow
 - 4–10 players; host starts the game.
