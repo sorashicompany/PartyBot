@@ -20,8 +20,8 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   let room = rooms[0];
   if (!room) return json({ error: "Room not found" }, 404);
   const players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name,score&order=joined_at.asc`);
-  room = await advanceExpiredPhase(env, room, players);
   if (!players.some(player => Number(player.telegram_user_id) === user.id)) return json({ error: "Not a room member" }, 403);
+  room = await advanceExpiredPhase(env, room, players);
 
   if (url.pathname === "/api/game/state" && request.method === "GET") {
     return json(await getState(env, room, players, user.id));
