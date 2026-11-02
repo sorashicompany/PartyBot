@@ -4,6 +4,7 @@ export interface Env {
   BOT_TOKEN: string;
   BOT_USERNAME: string;
   TELEGRAM_WEBHOOK_SECRET: string;
+  ROOM_TICKET_SECRET: string;
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
 }
