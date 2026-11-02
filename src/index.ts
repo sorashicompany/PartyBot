@@ -23,7 +23,7 @@ export default {
 
       if (url.pathname === "/telegram/webhook" && request.method === "POST") {
         const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
-        if (!secret || !timingSafeEqual(secret, env.TELEGRAM_WEBHOOK_SECRET)) return new Response("Unauthorized", { status: 401 });
+        if (!env.TELEGRAM_WEBHOOK_SECRET || !secret || !timingSafeEqual(secret, env.TELEGRAM_WEBHOOK_SECRET)) return new Response("Unauthorized", { status: 401 });
         const update = await request.json() as TelegramUpdate;
         ctx.waitUntil(handleTelegramUpdate(env, update));
         return Response.json({ ok: true });
@@ -76,6 +76,7 @@ export default {
 };
 
 export async function authenticateMiniApp(request: Request, botToken: string): Promise<{ id: number; first_name: string; last_name?: string }> {
+  if (!botToken) throw new Error("Telegram bot token is not configured");
   const initData = request.headers.get("X-Telegram-Init-Data") || "";
   if (!initData || initData.length > 8192) throw new Error("Missing Telegram initData");
   const params = new URLSearchParams(initData);
