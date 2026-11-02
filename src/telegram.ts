@@ -25,6 +25,18 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
   if (!message?.text || !message.from || !["group", "supergroup"].includes(message.chat.type)) return;
   if (!/^\/party(?:@\w+)?(?:\s|$)/i.test(message.text.trim())) return;
 
+  const cooldownSince = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const cooldownUrl = "/rest/v1/rooms?group_chat_id=eq." + message.chat.id + "&created_at=gte." + encodeURIComponent(cooldownSince) + "&select=id&limit=1";
+  const recentRooms = await fetch(new URL(cooldownUrl, env.SUPABASE_URL), {
+    headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` }
+  });
+  if (!recentRooms.ok) throw new Error(`Lobby cooldown lookup failed: ${recentRooms.status}`);
+  const recent = await recentRooms.json() as Array<{ id: string }>;
+  if (recent.length) {
+    await sendTelegramMessage(env, message.chat.id, "⏳ Новое лобби можно создать раз в 5 минут. Попробуйте немного позже.");
+    return;
+  }
+
   const code = randomRoomCode();
   const inserted = await fetch(new URL("/rest/v1/rooms", env.SUPABASE_URL), {
     method: "POST",
