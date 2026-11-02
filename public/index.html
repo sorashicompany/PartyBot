@@ -32,7 +32,7 @@
     <div id="players"></div>
     <div id="action"></div>
     <div id="answers" class="answers"></div>
-    <div id="gameStatus" class="meta"></div>
+    <div id="phaseTimer" class="prompt"></div><div id="gameStatus" class="meta"></div>
   </section>
   <footer>Одна комната. Много поводов смеяться.</footer>
 </main>
@@ -71,27 +71,30 @@
   function render(s){
     document.querySelector('#phase').textContent='КОМНАТА '+s.code+' · '+s.status.toUpperCase();
     document.querySelector('#roundTitle').innerHTML=s.status==='finished'?'Игра<br><em>окончена.</em>':'Раунд '+s.round+'<br><em>Quiplash.</em>';
-    document.querySelector('#prompt').textContent=s.prompt|| (s.status==='lobby'?'Ожидаем начала игры.':'');
+    document.querySelector('#prompt').textContent='';
     document.querySelector('#players').innerHTML=s.players.map(p=>'<div class="player">'+esc(p.name)+(p.isHost?' · ведущий':'')+'<span class="score">'+p.score+'</span></div>').join('');
     action.innerHTML='';answersEl.innerHTML='';
     if(s.status==='lobby'){
-      action.innerHTML=s.isHost?'<button id="start">НАЧАТЬ ИГРУ</button>':'<p>Ожидаем, пока ведущий начнёт игру. Нужно 4–10 игроков.</p>';
+      action.innerHTML=s.isHost?'<button id="start">НАЧАТЬ ИГРУ</button>':'<p>Ожидаем ведущего. Для старта нужно 4–10 игроков.</p>';
       document.querySelector('#start')?.addEventListener('click',()=>runAction('/api/game/start',{}));
     }else if(s.status==='answering'){
-      if(s.answered)action.innerHTML='<p>Ответ принят. Ожидаем остальных игроков.</p>';
-      else action.innerHTML='<textarea id="answer" maxlength="240" placeholder="Придумай самый смешной ответ…"></textarea><button id="sendAnswer">ОТПРАВИТЬ ОТВЕТ</button>';
-      document.querySelector('#sendAnswer')?.addEventListener('click',()=>runAction('/api/game/answer',{text:document.querySelector('#answer').value}));
+      const cards=(s.prompts||[]).map(p=>'<div class="answer"><div class="meta">ЗАДАНИЕ</div><p>'+esc(p.text)+'</p>'+(p.answered?'<div class="meta">Ответ принят</div>':'<textarea maxlength="240" data-answer="'+p.assignmentId+'" placeholder="напиши ответ строчными буквами…"></textarea><button data-submit="'+p.assignmentId+'">ОТПРАВИТЬ</button>')+'</div>').join('');
+      action.innerHTML=cards+(s.round===3?'<div class="answer"><label>Ставка финального раунда</label><input id="wager" type="number" min="0" max="10000" value="0" /></div>':'');
+      action.querySelectorAll('[data-submit]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.submit;const field=action.querySelector('[data-answer="'+id+'"]');runAction('/api/game/answer',{assignmentId:id,text:field.value,wager:Number(document.querySelector('#wager')?.value||0)})}));
     }else if(['voting','round_results','finished'].includes(s.status)){
-      answersEl.innerHTML=s.answers.map(a=>'<div class="answer"><p>'+esc(a.text)+'</p><div class="meta">'+(a.name?esc(a.name):'Анонимно')+' · '+a.votes+' голосов</div>'+ (s.status==='voting'&&!a.own&&!a.voted?'<button class="secondary" data-vote="'+a.id+'">ГОЛОСОВАТЬ</button>':'')+'</div>').join('');
+      const promptIds=[...new Set((s.answers||[]).map(a=>a.promptId))];
+      answersEl.innerHTML=promptIds.map(pid=>'<div class="answer"><div class="meta">'+esc(s.promptLabels?.[pid]||'ВОПРОС')+'</div>'+(s.answers||[]).filter(a=>a.promptId===pid).map(a=>'<div class="answer"><p>'+esc(a.text)+'</p><div class="meta">'+(a.name?esc(a.name):'Анонимно')+' · '+a.votes+' голосов</div>'+(s.status==='voting'&&!a.own&&!a.voted?'<button class="secondary" data-vote="'+a.id+'">ВЫБРАТЬ ЭТОТ ОТВЕТ</button>':'')+'</div>').join('')+'</div>').join('');
       answersEl.querySelectorAll('[data-vote]').forEach(b=>b.addEventListener('click',()=>runAction('/api/game/vote',{answerId:b.dataset.vote})));
-      if(s.status==='voting')action.innerHTML='<p>Проголосуй за каждый ответ, кроме собственного. Твои голоса: '+s.votesCast+' из '+s.votesNeeded+'.</p>';
+      if(s.status==='voting')action.innerHTML='<p>Выбери один ответ в каждом вопросе. Голосовать за себя нельзя.</p>';
       if(s.status==='round_results')action.innerHTML=s.isHost?'<button id="next">СЛЕДУЮЩИЙ РАУНД</button>':'<p>Раунд завершён. Ждём ведущего.</p>';
       if(s.status==='finished')action.innerHTML='<p>Игра завершена. Итоговый счёт показан выше.</p>';
       document.querySelector('#next')?.addEventListener('click',()=>runAction('/api/game/next',{}));
     }
     document.querySelector('#gameStatus').textContent='Игроков: '+s.players.length+' · Раунд '+s.round+' из 3';
+    const timer=document.querySelector('#phaseTimer');
+    if(s.deadline){const left=Math.max(0,Math.ceil((Date.parse(s.deadline)-Date.now())/1000));timer.textContent='Осталось: '+left+' сек.';}else timer.textContent='';
   }
-  async function runAction(path,body){try{await api(path,body);await refresh()}catch(e){alert(e.message)}}
+  setInterval(()=>{if(lastState?.deadline){const left=Math.max(0,Math.ceil((Date.parse(lastState.deadline)-Date.now())/1000));document.querySelector("#phaseTimer").textContent="Осталось: "+left+" сек.";}},1000);\n  setInterval(()=>{if(roomCode)refresh().catch(()=>{})},2000);\n  async function runAction(path,body){try{await api(path,body);await refresh()}catch(e){alert(e.message)}}
   document.querySelector('#join').addEventListener('click',join);
   if(input.value)join();
 </script></body></html>
