@@ -102,26 +102,23 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
 
 async function getState(env: Env, room: Room, players: Player[], userId: number): Promise<Record<string, unknown>> {
   const assignments = await getAssignments(env, room);
-  const own = assignments.find(item => Number(item.player_telegram_id) === userId);
-  const prompts = own ? await supabaseRequest<Prompt[]>(env, `prompts?id=eq.${own.prompt_id}&select=id,prompt_text`) : [];
-  const answers = ["voting", "round_results", "finished"].includes(room.status)
-    ? await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_assignment_id,author_telegram_id,answer_text`)
+  const ownAssignments = assignments.filter(item => Number(item.player_telegram_id) === userId);
+  const promptIds = [...new Set(ownAssignments.map(a => a.prompt_id))];
+  const prompts = promptIds.length ? await supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`) : [];
+  const submitted = ["voting", "round_results", "finished"].includes(room.status)
+    ? await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_assignment_id,prompt_id,author_telegram_id,answer_text,wager`)
     : [];
-  const votes = answers.length
-    ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${answers.map(a => a.id).join(",")})&select=answer_id,voter_telegram_id`)
-    : [];
-  const ownAnswer = own ? await supabaseRequest<Answer[]>(env, `answers?prompt_assignment_id=eq.${own.id}&select=id`) : [];
+  const votes = submitted.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${submitted.map(a => a.id).join(",")})&select=answer_id,voter_telegram_id`) : [];
+  const myAnswers = ownAssignments.length ? await supabaseRequest<Answer[]>(env, `answers?prompt_assignment_id=in.(${ownAssignments.map(a => a.id).join(",")})&select=prompt_assignment_id`) : [];
   const ownVoteTargets = votes.filter(v => Number(v.voter_telegram_id) === userId).map(v => v.answer_id);
-  const voteCounts = Object.fromEntries(answers.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
-  const playerNames = Object.fromEntries(players.map(p => [String(p.telegram_user_id), p.display_name]));
+  const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
+  const names = Object.fromEntries(players.map(p => [String(p.telegram_user_id), p.display_name]));
   return {
-    code: room.code, status: room.status, round: room.round_number,
+    code: room.code, status: room.status, round: room.round_number, deadline: room.phase_deadline_at || null,
     players: players.map(p => ({ name: p.display_name, score: p.score, isHost: Number(room.host_telegram_id) === Number(p.telegram_user_id) })),
-    prompt: prompts[0]?.prompt_text || null,
-    answered: ownAnswer.length > 0,
-    answers: answers.map(a => ({ id: a.id, text: a.answer_text, name: room.status === "round_results" || room.status === "finished" ? playerNames[String(a.author_telegram_id)] : undefined, own: Number(a.author_telegram_id) === userId, votes: voteCounts[a.id] || 0, voted: ownVoteTargets.includes(a.id) })),
-    votesCast: ownVoteTargets.length,
-    votesNeeded: Math.max(0, players.length - 1),
+    prompts: ownAssignments.map(a => ({ assignmentId: a.id, promptId: a.prompt_id, text: prompts.find(p => p.id === a.prompt_id)?.prompt_text || "", answered: myAnswers.some(x => x.prompt_assignment_id === a.id) })),
+    answers: submitted.map(a => ({ id: a.id, promptId: a.prompt_id, text: a.answer_text, name: room.status === "round_results" || room.status === "finished" ? names[String(a.author_telegram_id)] : undefined, own: Number(a.author_telegram_id) === userId, votes: voteCounts[a.id] || 0, voted: ownVoteTargets.includes(a.id), wager: a.wager || 0 })),
+    votesCast: ownVoteTargets.length, votesNeeded: room.round_number === 3 ? 1 : 2,
     isHost: Number(room.host_telegram_id) === userId
   };
 }
