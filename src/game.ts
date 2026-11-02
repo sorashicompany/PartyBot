@@ -47,7 +47,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (existing.length) return json({ error: "Answer already submitted" }, 409);
     await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify({
       room_id: room.id, round_number: room.round_number, prompt_assignment_id: ownAssignment.id, prompt_id: ownAssignment.prompt_id,
-      author_telegram_id: user.id, answer_text: answerText, wager: Math.max(0, Number(body.wager || 0))
+      author_telegram_id: user.id, answer_text: answerText, wager: room.round_number === 3 ? Math.max(0, Math.min(Number(body.wager || 0), players.find(p => Number(p.telegram_user_id) === user.id)?.score || 0)) : 0
     }) });
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`);
     if (answers.length >= (room.round_number === 3 ? players.length : players.length * 2)) {
@@ -68,9 +68,9 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (!ownAssignment) return json({ error: "No prompt assigned" }, 409);
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_assignment_id,prompt_id,author_telegram_id,answer_text,wager`);
     const target = answers.find(answer => answer.id === answerId);
-    if (!target || target.prompt_assignment_id === ownAssignment.id || Number(target.author_telegram_id) === user.id) {
-      return json({ error: "You cannot vote for this answer" }, 400);
-    }
+    if (!target || Number(target.author_telegram_id) === user.id) return json({ error: "You cannot vote for your own answer" }, 400);
+    const matchupAnswers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&prompt_id=eq.${target.prompt_id}&select=author_telegram_id`);
+    if (matchupAnswers.some(a => Number(a.author_telegram_id) === user.id)) return json({ error: "Writers cannot vote in their own matchup" }, 400);
     const ownVotes = await supabaseRequest<Vote[]>(env, `votes?prompt_id=eq.${target.prompt_id}&voter_telegram_id=eq.${user.id}&select=answer_id`);
     if (ownVotes.length) return json({ error: "Already voted for this answer" }, 409);
     await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
