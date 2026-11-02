@@ -1,4 +1,4 @@
-name: verify
+name: verify-and-deploy
 
 on:
   push:
@@ -9,6 +9,14 @@ on:
 jobs:
   typecheck:
     runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      BOT_USERNAME: ${{ secrets.BOT_USERNAME }}
+      TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+      ROOM_TICKET_SECRET: ${{ secrets.ROOM_TICKET_SECRET }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,3 +24,34 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: npm run check
+      - name: Deploy Worker and upload secrets
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.BOT_TOKEN != '' && env.BOT_USERNAME != '' && env.TELEGRAM_WEBHOOK_SECRET != '' && env.ROOM_TICKET_SECRET != '' && env.SUPABASE_SERVICE_ROLE_KEY != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          printf '%s' "$BOT_TOKEN" | npx wrangler secret put BOT_TOKEN
+          printf '%s' "$BOT_USERNAME" | npx wrangler secret put BOT_USERNAME
+          printf '%s' "$TELEGRAM_WEBHOOK_SECRET" | npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+          printf '%s' "$ROOM_TICKET_SECRET" | npx wrangler secret put ROOM_TICKET_SECRET
+          printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+          npx wrangler deploy
+          node --input-type=module <<'NODE'
+          const token = process.env.BOT_TOKEN;
+          const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+          const url = "https://sorashi-party-fun-bot.sorashithegod.workers.dev/telegram/webhook";
+          const call = async (method, body) => {
+            const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            if (!data.ok) throw new Error(`Telegram ${method} failed: ${data.description || response.status}`);
+          };
+          await call("setWebhook", { url, secret_token: secret, allowed_updates: ["message"] });
+          await call("setMyCommands", { commands: [{ command: "party", description: "Создать комнату Quiplash" }] });
+          NODE
+      - name: Deployment skipped — add required GitHub Actions secrets
+        if: ${{ env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == '' || env.BOT_TOKEN == '' || env.BOT_USERNAME == '' || env.TELEGRAM_WEBHOOK_SECRET == '' || env.ROOM_TICKET_SECRET == '' || env.SUPABASE_SERVICE_ROLE_KEY == '' }}
+        run: echo "Typecheck passed. Deployment skipped because one or more deployment secrets are not configured."
