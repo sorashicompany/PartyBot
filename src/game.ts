@@ -17,7 +17,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   if (!/^[A-HJ-NP-Z2-9]{5}$/.test(code)) return json({ error: "Invalid room code" }, 400);
 
   const rooms = await supabaseRequest<Room[]>(env, `rooms?code=eq.${code}&select=id,code,host_telegram_id,status,round_number,phase_deadline_at&limit=1`);
-  const room = rooms[0];
+  let room = rooms[0];
   if (!room) return json({ error: "Room not found" }, 404);
   const players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name,score&order=joined_at.asc`);
   room = await advanceExpiredPhase(env, room, players);
@@ -181,13 +181,11 @@ async function castBotVotes(env: Env, room: Room, players: Player[]): Promise<vo
   const botIds = players.map(p => Number(p.telegram_user_id)).filter(isBotPlayer);
   if (!botIds.length) return;
   const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_id,author_telegram_id`);
+  const allPromptIds = [...new Set(assignments.map(a => a.prompt_id))];
   const votes: Array<{ answer_id: string; prompt_id: string; voter_telegram_id: number }> = [];
-  for (const botId of botIds) {
-    const prompts = [...new Set(assignments.filter(a => Number(a.player_telegram_id) === botId).map(a => a.prompt_id))];
-    for (const promptId of prompts) {
-      const options = answers.filter(a => a.prompt_id === promptId && Number(a.author_telegram_id) !== botId);
-      if (options.length) votes.push({ answer_id: options[randomIndex(options.length)].id, prompt_id: promptId, voter_telegram_id: botId });
-    }
+  for (const botId of botIds) for (const promptId of allPromptIds) {
+    const options = answers.filter(a => a.prompt_id === promptId && Number(a.author_telegram_id) !== botId);
+    if (options.length) votes.push({ answer_id: options[randomIndex(options.length)].id, prompt_id: promptId, voter_telegram_id: botId });
   }
   if (votes.length) await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify(votes) });
 }
