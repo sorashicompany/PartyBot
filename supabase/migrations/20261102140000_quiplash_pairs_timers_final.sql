@@ -8,7 +8,8 @@ alter table public.round_prompts
   add column if not exists prompt_slot smallint not null default 1;
 
 alter table public.answers
-  add column if not exists wager integer not null default 0 check (wager >= 0);
+  add column if not exists wager integer not null default 0 check (wager >= 0),
+  add column if not exists prompt_id uuid references public.prompts(id);
 
 alter table public.votes
   add column if not exists prompt_id uuid references public.prompts(id);
