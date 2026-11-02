@@ -31,7 +31,7 @@ export default {
       }
 
       if (url.pathname === "/api/rooms/join" && request.method === "POST") {
-        const user = await authenticateMiniApp(request, env.BOT_TOKEN);
+        let user: { id: number; first_name: string; last_name?: string };\n        try { user = await authenticateMiniApp(request, env.BOT_TOKEN); }\n        catch { return Response.json({ error: "Unauthorized Telegram session" }, { status: 401, headers: corsHeaders }); }
         const body = await request.json() as { code?: string };
         const code = (body.code || "").toUpperCase();
         if (!/^[A-HJ-NP-Z2-9]{5}$/.test(code)) return Response.json({ error: "Invalid room code" }, { status: 400 });
@@ -91,7 +91,7 @@ async function authenticateMiniApp(request: Request, botToken: string): Promise<
   const actualHash = [...signature].map(b => b.toString(16).padStart(2, "0")).join("");
   if (!constantTimeHexEqual(actualHash, receivedHash)) throw new Error("Telegram initData signature mismatch");
   const authDate = Number(params.get("auth_date") || 0);
-  if (!authDate || Date.now() / 1000 - authDate > 3600) throw new Error("Telegram initData expired");
+  const ageSeconds = Date.now() / 1000 - authDate;\n  if (!authDate || ageSeconds > 3600 || ageSeconds < -60) throw new Error("Telegram initData expired");
   const rawUser = params.get("user");
   if (!rawUser) throw new Error("Telegram user missing");
   return JSON.parse(rawUser) as { id: number; first_name: string; last_name?: string };
