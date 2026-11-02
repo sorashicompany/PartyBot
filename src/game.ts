@@ -115,7 +115,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
 
 async function getState(env: Env, room: Room, players: Player[], userId: number): Promise<Record<string, unknown>> {
   const assignments = await getAssignments(env, room);
-  const ownAssignments = assignments.filter(item => Number(item.player_telegram_id) === userId);
+  const ownAssignments = assignments.filter(item => Number(item.player_telegram_id) === userId).sort((a,b) => (a.prompt_slot || 1) - (b.prompt_slot || 1));
   const promptIds = [...new Set(assignments.map(a => a.prompt_id))];
   const prompts = promptIds.length ? await supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`) : [];
   const submitted = ["voting", "round_results", "finished"].includes(room.status)
