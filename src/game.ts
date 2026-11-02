@@ -192,14 +192,33 @@ async function castBotVotes(env: Env, room: Room, players: Player[]): Promise<vo
 }
 
 async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promise<void> {
-  const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,author_telegram_id`);
+  const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_id,author_telegram_id,wager`);
   const answerIds = answers.map(a => a.id);
   const votes = answerIds.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${answerIds.join(",")})&select=answer_id,voter_telegram_id`) : [];
-  const scores = new Map<number, number>();
-  for (const answer of answers) scores.set(Number(answer.author_telegram_id), (scores.get(Number(answer.author_telegram_id)) || 0) + votes.filter(v => v.answer_id === answer.id).length * 1000);
+  const earned = new Map<number, number>();
+  if (room.round_number === 3) {
+    const pool = answers.reduce((sum, a) => sum + Math.min(Number(a.wager || 0), 1000000), 0);
+    for (const a of answers) earned.set(Number(a.author_telegram_id), -Math.min(Number(a.wager || 0), 1000000));
+    const counts = answers.map(a => ({ id: a.id, author: Number(a.author_telegram_id), count: votes.filter(v => v.answer_id === a.id).length }));
+    const high = Math.max(0, ...counts.map(x => x.count));
+    const winners = counts.filter(x => x.count === high && high > 0);
+    if (winners.length) { const share = Math.floor(pool / winners.length); for (const w of winners) earned.set(w.author, (earned.get(w.author) || 0) + share); }
+  } else {
+    const promptIds = [...new Set(answers.map(a => a.prompt_id).filter(Boolean))] as string[];
+    for (const promptId of promptIds) {
+      const options = answers.filter(a => a.prompt_id === promptId);
+      const counts = options.map(a => ({ answer: a, count: votes.filter(v => v.answer_id === a.id).length }));
+      const total = counts.reduce((sum, x) => sum + x.count, 0);
+      for (const x of counts) {
+        const unanimousBonus = total > 0 && x.count === total && x.count === players.length - 2 ? 1000 : 0;
+        const points = x.count * 1000 + unanimousBonus;
+        earned.set(Number(x.answer.author_telegram_id), (earned.get(Number(x.answer.author_telegram_id)) || 0) + points);
+      }
+    }
+  }
   for (const player of players) {
-    const earned = scores.get(Number(player.telegram_user_id)) || 0;
-    if (earned) await supabaseRequest(env, `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${player.telegram_user_id}`, { method: "PATCH", body: JSON.stringify({ score: player.score + earned }) });
+    const delta = earned.get(Number(player.telegram_user_id)) || 0;
+    if (delta) await supabaseRequest(env, `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${player.telegram_user_id}`, { method: "PATCH", body: JSON.stringify({ score: Math.max(0, player.score + delta) }) });
   }
 }
 
