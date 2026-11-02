@@ -1,3 +1,5 @@
+import type { GameRoom } from "./game-room";
+
 export interface Env {
   GAME_ROOMS: DurableObjectNamespace<GameRoom>;
   ASSETS: Fetcher;
@@ -25,7 +27,3 @@ export interface TelegramUpdate {
   };
 }
 
-export interface GameRoom {
-  fetch(request: Request): Promise<Response>;
-  broadcast(event: string, payload: unknown): Promise<void>;
-}
