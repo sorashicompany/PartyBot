@@ -66,7 +66,7 @@
   }
   async function refresh(){
     if(!roomCode)return;
-    const s=await api('/api/game/state');lastState=s;render(s);
+    const s=await api('/api/game/state');lastState=s;if(document.activeElement?.tagName==='TEXTAREA')return;render(s);
   }
   function render(s){
     document.querySelector('#phase').textContent='КОМНАТА '+s.code+' · '+s.status.toUpperCase();
