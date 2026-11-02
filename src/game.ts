@@ -3,11 +3,11 @@ import type { Env } from "./types";
 import { isBotPlayer, makeBotAnswer } from "./bots";
 
 type MiniUser = { id: number; first_name: string; last_name?: string };
-type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number };
+type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number; phase_deadline_at?: string | null };
 type Player = { telegram_user_id: number; display_name: string; score: number };
 type Prompt = { id: string; prompt_text: string };
-type Assignment = { id: string; prompt_id: string; player_telegram_id: number };
-type Answer = { id: string; prompt_assignment_id: string; author_telegram_id: number; answer_text: string };
+type Assignment = { id: string; prompt_id: string; player_telegram_id: number; pair_key?: string | null; prompt_slot?: number };
+type Answer = { id: string; prompt_assignment_id: string; prompt_id?: string; author_telegram_id: number; answer_text: string; wager?: number };
 type Vote = { answer_id: string; voter_telegram_id: number };
 
 export async function handleGameRequest(request: Request, env: Env, user: MiniUser): Promise<Response> {
@@ -16,7 +16,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   const code = String(body.code || url.searchParams.get("code") || "").toUpperCase();
   if (!/^[A-HJ-NP-Z2-9]{5}$/.test(code)) return json({ error: "Invalid room code" }, 400);
 
-  const rooms = await supabaseRequest<Room[]>(env, `rooms?code=eq.${code}&select=id,code,host_telegram_id,status,round_number&limit=1`);
+  const rooms = await supabaseRequest<Room[]>(env, `rooms?code=eq.${code}&select=id,code,host_telegram_id,status,round_number,phase_deadline_at&limit=1`);
   const room = rooms[0];
   if (!room) return json({ error: "Room not found" }, 404);
   const players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name,score&order=joined_at.asc`);
@@ -36,7 +36,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   }
 
   if (url.pathname === "/api/game/answer" && request.method === "POST") {
-    const answerText = String(body.text || "").trim();
+    const answerText = String(body.text || "").trim().toLocaleLowerCase("ru-RU");
     if (room.status !== "answering") return json({ error: "Answer phase is closed" }, 409);
     if (answerText.length < 1 || answerText.length > 240) return json({ error: "Answer must be 1–240 characters" }, 400);
     const assignments = await getAssignments(env, room);
