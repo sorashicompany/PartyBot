@@ -104,7 +104,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
 async function getState(env: Env, room: Room, players: Player[], userId: number): Promise<Record<string, unknown>> {
   const assignments = await getAssignments(env, room);
   const ownAssignments = assignments.filter(item => Number(item.player_telegram_id) === userId);
-  const promptIds = [...new Set(ownAssignments.map(a => a.prompt_id))];
+  const promptIds = [...new Set(assignments.map(a => a.prompt_id))];
   const prompts = promptIds.length ? await supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`) : [];
   const submitted = ["voting", "round_results", "finished"].includes(room.status)
     ? await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_assignment_id,prompt_id,author_telegram_id,answer_text,wager`)
@@ -117,7 +117,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   return {
     code: room.code, status: room.status, round: room.round_number, deadline: room.phase_deadline_at || null,
     players: players.map(p => ({ name: p.display_name, score: p.score, isHost: Number(room.host_telegram_id) === Number(p.telegram_user_id) })),
-    prompts: ownAssignments.map(a => ({ assignmentId: a.id, promptId: a.prompt_id, text: prompts.find(p => p.id === a.prompt_id)?.prompt_text || "", answered: myAnswers.some(x => x.prompt_assignment_id === a.id) })),
+    prompts: ownAssignments.map(a => ({ assignmentId: a.id, promptId: a.prompt_id, text: prompts.find(p => p.id === a.prompt_id)?.prompt_text || "", answered: myAnswers.some(x => x.prompt_assignment_id === a.id) })),\n    promptLabels: Object.fromEntries(prompts.map(p => [p.id, p.prompt_text])),
     answers: submitted.map(a => ({ id: a.id, promptId: a.prompt_id, text: a.answer_text, name: room.status === "round_results" || room.status === "finished" ? names[String(a.author_telegram_id)] : undefined, own: Number(a.author_telegram_id) === userId, votes: voteCounts[a.id] || 0, voted: ownVoteTargets.includes(a.id), wager: a.wager || 0 })),
     votesCast: ownVoteTargets.length, votesNeeded: room.round_number === 3 ? 1 : 2,
     isHost: Number(room.host_telegram_id) === userId
