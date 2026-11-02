@@ -135,22 +135,29 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
   const usedIds = [...new Set(used.map(row => row.prompt_id))];
   let available = await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
   available = available.filter(prompt => !usedIds.includes(prompt.id));
-  if (!available.length) available = await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
+  if (available.length < players.length) available = await supabaseRequest<Prompt[]>(env, "prompts?enabled=eq.true&locale=eq.ru&select=id,prompt_text&limit=100");
   if (!available.length) throw new Error("No enabled prompts available");
-  const prompt = available[randomIndex(available.length)];
-  await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(players.map(player => ({
-    room_id: room.id, round_number: round, prompt_id: prompt.id, player_telegram_id: player.telegram_user_id
-  }))) });
-  await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "answering", round_number: round, updated_at: new Date().toISOString() }) });
-
-  const roundRoom = { ...room, round_number: round };
-  const assignments = await getAssignments(env, roundRoom);
-  const botAnswers = assignments
-    .filter(item => isBotPlayer(Number(item.player_telegram_id)))
-    .map(item => {
-      const seed = [...item.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) + round;
-      return { room_id: room.id, round_number: round, prompt_assignment_id: item.id, author_telegram_id: item.player_telegram_id, answer_text: makeBotAnswer(seed) };
-    });
+  const shuffled = [...players].sort(() => Math.random() - 0.5);
+  const rows: Array<Record<string, unknown>> = [];
+  if (round === 3) {
+    const prompt = available[randomIndex(available.length)];
+    for (const player of shuffled) rows.push({ room_id: room.id, round_number: round, prompt_id: prompt.id, player_telegram_id: player.telegram_user_id, pair_key: "final", prompt_slot: 1 });
+  } else {
+    // Ring pairing: each player receives two prompts; each prompt is shared by two players.
+    for (let i = 0; i < shuffled.length; i++) {
+      const prompt = available[i % available.length];
+      const pairKey = "p" + i;
+      rows.push({ room_id: room.id, round_number: round, prompt_id: prompt.id, player_telegram_id: shuffled[i].telegram_user_id, pair_key: pairKey, prompt_slot: 1 });
+      rows.push({ room_id: room.id, round_number: round, prompt_id: prompt.id, player_telegram_id: shuffled[(i + 1) % shuffled.length].telegram_user_id, pair_key: pairKey, prompt_slot: 2 });
+    }
+  }
+  await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
+  await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "answering", round_number: round, phase_deadline_at: new Date(Date.now() + 60000).toISOString(), updated_at: new Date().toISOString() }) });
+  const assignments = await getAssignments(env, { ...room, round_number: round });
+  const botAnswers = assignments.filter(item => isBotPlayer(Number(item.player_telegram_id))).map(item => {
+    const seed = [...item.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) + round;
+    return { room_id: room.id, round_number: round, prompt_assignment_id: item.id, prompt_id: item.prompt_id, author_telegram_id: item.player_telegram_id, answer_text: makeBotAnswer(seed).toLocaleLowerCase("ru-RU"), wager: 0 };
+  });
   if (botAnswers.length) await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify(botAnswers) });
 }
 
