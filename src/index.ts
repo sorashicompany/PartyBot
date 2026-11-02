@@ -83,7 +83,9 @@ export async function authenticateMiniApp(request: Request, botToken: string): P
   const receivedHash = params.get("hash");
   if (!receivedHash) throw new Error("Invalid Telegram initData");
   params.delete("hash");
-  const checkString = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
+  const entries: Array<[string, string]> = [];
+  params.forEach((value, key) => entries.push([key, value]));
+  const checkString = entries.sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
   const encoder = new TextEncoder();
   const webAppKey = await crypto.subtle.importKey("raw", encoder.encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const secretKey = await crypto.subtle.sign("HMAC", webAppKey, encoder.encode(botToken));
