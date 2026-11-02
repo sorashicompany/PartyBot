@@ -220,7 +220,7 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
   const assignments = await getAssignments(env, { ...room, round_number: round });
   const botAnswers = assignments.filter(item => isBotPlayer(Number(item.player_telegram_id))).map(item => {
     const seed = [...item.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) + round;
-    return { room_id: room.id, round_number: round, prompt_assignment_id: item.id, prompt_id: item.prompt_id, author_telegram_id: item.player_telegram_id, answer_text: makeBotAnswer(seed).toLocaleLowerCase("ru-RU"), wager: 0 };
+    return { room_id: room.id, round_number: round, prompt_assignment_id: item.id, prompt_id: item.prompt_id, author_telegram_id: item.player_telegram_id, answer_text: makeBotAnswer(seed, available.find(prompt => prompt.id === item.prompt_id)?.prompt_text).toLocaleLowerCase("ru-RU"), wager: 0 };
   });
   if (botAnswers.length) await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify(botAnswers) });
 }
