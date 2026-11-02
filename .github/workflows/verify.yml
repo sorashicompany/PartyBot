@@ -35,13 +35,14 @@ jobs:
         run: |
           printf '%s' "$BOT_TOKEN" | npx wrangler secret put BOT_TOKEN
           printf '%s' "$BOT_USERNAME" | npx wrangler secret put BOT_USERNAME
-          printf '%s' "$TELEGRAM_WEBHOOK_SECRET" | npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+          printf '%s' "$TELEGRAM_WEBHOOK_SECRET" | sha256sum | cut -d ' ' -f1 | npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
           printf '%s' "$ROOM_TICKET_SECRET" | npx wrangler secret put ROOM_TICKET_SECRET
           printf '%s' "$SUPABASE_SERVICE_ROLE_KEY" | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
           npx wrangler deploy
           node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
           const token = process.env.BOT_TOKEN;
-          const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+          const secret = createHash("sha256").update(process.env.TELEGRAM_WEBHOOK_SECRET).digest("hex");
           const url = "https://sorashi-party-fun-bot.sorashithegod.workers.dev/telegram/webhook";
           const call = async (method, body) => {
             const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
