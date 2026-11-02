@@ -24,6 +24,8 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: npm run check
+      - name: Check Mini App JavaScript syntax
+        run: node --input-type=module -e 'import { readFileSync } from "node:fs"; import vm from "node:vm"; const html = readFileSync("public/index.html", "utf8"); const script = html.match(/<script>([\\s\\S]*?)<\\/script>/)?.[1]; if (!script) throw new Error("Inline Mini App script not found"); new vm.Script(script);'
       - name: Deploy Worker and upload secrets
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.BOT_TOKEN != '' && env.BOT_USERNAME != '' && env.TELEGRAM_WEBHOOK_SECRET != '' && env.ROOM_TICKET_SECRET != '' && env.SUPABASE_SERVICE_ROLE_KEY != '' }}
         env:
