@@ -1,0 +1,66 @@
+name: Import PartyGame2 source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PartyBot
+        uses: actions/checkout@v4
+        with:
+          ref: partygame2-telegram-port
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: target
+
+      - name: Checkout PartyGame2
+        uses: actions/checkout@v4
+        with:
+          repository: sorashicompany/partygame2
+          ref: main
+          path: source
+          persist-credentials: false
+
+      - name: Import complete application source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/imported/partygame2
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='node_modules/' \
+            --exclude='.vercel/output/' \
+            --exclude='.grok/' \
+            source/ target/imported/partygame2/
+          cat > target/imported/partygame2/IMPORT-NOTES.md <<'EOF'
+          # PartyGame2 source import
+
+          This directory is a faithful source snapshot of sorashicompany/partygame2.
+          Generated output, installed dependencies, Git metadata, and Grok workspace
+          metadata are excluded. Application source, assets, scripts, migrations,
+          tests, and lockfiles are retained.
+
+          The imported app is intentionally isolated from the existing Cloudflare
+          Worker until its auth, data, and runtime adapters are ported. Do not expose
+          Supabase service-role credentials to the browser. Telegram Mini App
+          identity must be verified server-side from Telegram.WebApp.initData.
+          EOF
+
+      - name: Commit imported source
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add imported/partygame2
+          if git diff --cached --quiet; then
+            echo "No source changes to import."
+            exit 0
+          fi
+          git commit -m "Import PartyGame2 application source"
+          git push origin HEAD:partygame2-telegram-port
