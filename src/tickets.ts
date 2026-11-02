@@ -17,12 +17,14 @@ async function hmacKey(secret: string, usage: KeyUsage[]): Promise<CryptoKey> {
 }
 
 export async function createRoomTicket(env: Env, code: string, userId: number): Promise<string> {
+  if (!env.ROOM_TICKET_SECRET) throw new Error("Room ticket secret is not configured");
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify({ code, userId, exp: Math.floor(Date.now() / 1000) + 3600 })));
   const signature = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(env.ROOM_TICKET_SECRET, ["sign"]), new TextEncoder().encode(payload)));
   return payload + "." + toBase64Url(signature);
 }
 
 export async function verifyRoomTicket(secret: string, ticket: string, expectedCode: string): Promise<{ userId: number } | null> {
+  if (!secret) return null;
   const parts = ticket.split(".");
   if (parts.length !== 2) return null;
   const valid = await crypto.subtle.verify("HMAC", await hmacKey(secret, ["verify"]), fromBase64Url(parts[1]), new TextEncoder().encode(parts[0]));
