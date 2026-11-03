@@ -38,8 +38,8 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
   if (!message?.text || !message.from || !["group", "supergroup"].includes(message.chat.type)) return;
   if (!/^\/party(?:@\w+)?(?:\s|$)/i.test(message.text.trim())) return;
 
-  const command = message.text.trim().replace(/^\/party(?:@\\w+)?\\s*/i, "").trim();
-  if (/^(?:bots(?:\\s+\\d+)?|clearbots)$/i.test(command)) {
+  const command = message.text.trim().replace(/^\/party(?:@\w+)?\s*/i, "").trim();
+  if (/^(?:bots(?:\s+\d+)?|clearbots)$/i.test(command)) {
     const rooms = await supabaseRequest<Array<{ id: string; code: string; host_telegram_id: number; status: string }>>(
       env,
       `rooms?group_chat_id=eq.${message.chat.id}&status=eq.lobby&select=id,code,host_telegram_id,status&order=created_at.desc&limit=1`,
@@ -64,7 +64,7 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
       });
       await sendTelegramMessage(env, message.chat.id, `Удалено тестовых игроков: ${removed.length}.`);
     } else {
-      const requested = Number(command.match(/\\d+/)?.[0] || 1);
+      const requested = Number(command.match(/\d+/)?.[0] || 1);
       if (!Number.isInteger(requested) || requested < 1 || requested > 10) {
         await sendTelegramMessage(env, message.chat.id, "Укажите количество от 1 до 10: /party bots 5");
         return;
