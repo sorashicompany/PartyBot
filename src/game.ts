@@ -736,6 +736,12 @@ async function playBotQuestions(env: Env, room: Room, players: Player[]): Promis
   await Promise.all(created.filter((item): item is NonNullable<typeof item> => Boolean(item)).map(item =>
     doRoom.saveRoundQuestion({ round, userId: item.userId, promptId: item.promptId, promptSlot: item.slot })));
   if (created.some(Boolean)) await notify(env, room.code, "room_changed", { code: room.code, botQuestions: created.filter(Boolean).length });
+  // If humans finished while bot questions were being generated, let the bot
+  // completion unblock the phase immediately instead of waiting for timeout.
+  const allQuestions = await doRoom.getRoundQuestions(round);
+  if (round < 3 && allQuestions.length >= players.length * 2) {
+    await beginCustomRound(env, { ...room, status: "custom_writing", round_number: round }, players);
+  }
 }
 
 async function beginCustomRound(env: Env, room: Room, players: Player[]): Promise<void> {
