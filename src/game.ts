@@ -214,6 +214,17 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   return json({ error: "Не найдено" }, 404);
 }
 
+export async function settleRoomVoting(env: Env, code: string): Promise<void> {
+  const rooms = await supabaseRequest<Room[]>(
+    env,
+    `rooms?code=eq.${code}&select=id,code,host_telegram_id,status,round_number,phase_deadline_at,voting_prompt_index,custom_prompts_enabled&limit=1`,
+  );
+  const room = rooms[0];
+  if (!room || room.status !== "voting") return;
+  const players = await reloadPlayers(env, room.id);
+  await settleVoting(env, room, players, false);
+}
+
 async function getState(env: Env, room: Room, players: Player[], userId: number): Promise<Record<string, unknown>> {
   if (room.status === "round_results") players = await ensureAwarded(env, room, players);
   const assignments = room.round_number > 0 ? await getAssignments(env, room) : [];
