@@ -57,6 +57,10 @@ export class GameRoom extends DurableObject<Env> {
         round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, revealed_at INTEGER NOT NULL,
         PRIMARY KEY (round, prompt_index)
       )`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS question_awards (
+        round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, awarded_at INTEGER NOT NULL,
+        PRIMARY KEY (round, prompt_index)
+      )`);
     });
   }
 
@@ -227,6 +231,26 @@ export class GameRoom extends DurableObject<Env> {
       round, promptIndex, Date.now(),
     );
     return true;
+  }
+
+  async claimQuestionAward(round: number, promptIndex: number): Promise<boolean> {
+    const existing = this.ctx.storage.sql.exec(
+      `SELECT round FROM question_awards WHERE round = ? AND prompt_index = ?`,
+      round, promptIndex,
+    ).toArray();
+    if (existing.length) return false;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO question_awards (round, prompt_index, awarded_at) VALUES (?, ?, ?)`,
+      round, promptIndex, Date.now(),
+    );
+    return true;
+  }
+
+  async rollbackQuestionAward(round: number, promptIndex: number): Promise<void> {
+    this.ctx.storage.sql.exec(
+      `DELETE FROM question_awards WHERE round = ? AND prompt_index = ?`,
+      round, promptIndex,
+    );
   }
 
   async claimRoundAward(round: number): Promise<boolean> {
