@@ -5,7 +5,7 @@ type Prompt = { assignmentId: string; promptId: string; text: string; answered: 
 type Answer = { id: string; promptId: string; pairKey?: string; text: string; name?: string; own: boolean; votes: number; voted: boolean; wager: number };
 type ChatLine = { id: number; name: string; text: string; mine: boolean; at: number };
 type RoomState = {
-  code: string; status: string; round: number; deadline: string | null; customPromptCount: number; customPromptSubmitted: boolean; customPromptRequired: number; customPromptWriterName: string; isCustomPromptWriter: boolean; isFinalQuestionAuthor: boolean;
+  code: string; status: string; round: number; deadline: string | null; customPromptCount: number; customPromptSubmitted: boolean; customPromptSubmittedSlots?: number[]; customPromptRequired: number; customPromptWriterName: string; isCustomPromptWriter: boolean; isFinalQuestionAuthor: boolean;
   votingPromptIndex: number; votingPromptTotal?: number; customPromptsEnabled: boolean; isPromptAuthor: boolean;
   players: Player[]; prompts: Prompt[]; promptLabels: Record<string, string>;
   activeVotingPromptId: string | null; activePairKey: string | null; answers: Answer[];
@@ -19,6 +19,7 @@ const MARKS = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З"];
 export function MiniApp({ initData, startCode, displayName }: Props) {
   const [code, setCode] = useState(startCode);
   const [room, setRoom] = useState<RoomState | null>(null);
+  const [roomTicket, setRoomTicket] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [custom, setCustom] = useState("");
@@ -54,17 +55,32 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
   }, [api, room?.code]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
     if (!room) return;
-    const timer = window.setInterval(() => setRefresh(v => v + 1), room.status === "voting" ? 1000 : 1800);
+    const timer = window.setInterval(() => setRefresh(v => v + 1), 5000);
     return () => window.clearInterval(timer);
   }, [room?.code, room?.status]);
 
   useEffect(() => { void loadState(); }, [loadState, refresh]);
+
+  useEffect(() => {
+    if (!room?.code || !roomTicket) return;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/rooms/${room.code}?ticket=${encodeURIComponent(roomTicket)}`);
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as { type?: string };
+        if (message.type && message.type !== "connected" && message.type !== "pong") {
+          void loadState();
+        }
+      } catch { /* Ignore malformed room events; the fallback poll remains active. */ }
+    };
+    return () => socket.close(1000, "room view changed");
+  }, [room?.code, roomTicket, loadState]);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
@@ -89,6 +105,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
     try {
       const data = await api("/api/rooms/join", "POST", { code: code.trim().toUpperCase() });
       const joinedCode = String(data.code || code).toUpperCase();
+      setRoomTicket(String(data.ticket || ""));
       const state = await api(`/api/game/state?code=${encodeURIComponent(joinedCode)}`);
       setRoom(state as unknown as RoomState);
       setCode(joinedCode);
@@ -170,7 +187,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
             </form>
           </section>
         ) : (
-          <section className={`sheet slam-in${room.status === "voting" ? " wide" : ""}`}>
+          <section key={`${room.code}:${room.status}:${room.round}:${room.votingPromptIndex}`} className={`sheet slam-in${room.status === "voting" ? " wide" : ""}`}>
             <p className="kicker">
               {room.code}
               {room.round ? ` · раунд ${room.round}/3` : " · лобби"}
@@ -200,15 +217,15 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               <div className="stack">
                 <h1 className="display">{room.round === 3 ? <>Финальный<br /><em>вопрос.</em></> : <>Твой<br /><em>вопрос.</em></>}</h1>
                 {room.round === 3 ? (
-                  <p className="lead">Лидер по очкам — {room.customPromptWriterName}. Он придумывает вопрос, но сам на него не отвечает.</p>
+                  <p className="lead">Лидер по очкам — {room.customPromptWriterName}. Он придумывает финальный вопрос, но сам на него не отвечает.</p>
                 ) : (
-                  <p className="lead">Каждый игрок придумывает один вопрос для этого раунда. На свой вопрос автор не отвечает. Принято: {room.customPromptCount}/{room.customPromptRequired}.</p>
+                  <p className="lead">Каждый игрок пишет два вопроса. Принято: {room.customPromptCount}/{room.customPromptRequired}.</p>
                 )}
-                {room.customPromptSubmitted ? <p className="lead">Вопрос принят. Ждём остальных.</p> : room.isCustomPromptWriter ? (
+                {room.customPromptSubmitted ? <p className="lead">Все вопросы отправлены. Ждём остальных.</p> : room.isCustomPromptWriter ? (
                   <>
-                    <label className="field-label" htmlFor="custom-question">Твой вопрос <span>{custom.length}/240</span></label>
+                    <label className="field-label" htmlFor="custom-question">{room.round === 3 ? "Финальный вопрос" : `Вопрос №${room.customPromptSubmittedSlots?.includes(1) ? 2 : 1} из 2`} <span>{custom.length}/240</span></label>
                     <textarea id="custom-question" className="area" maxLength={240} value={custom} onChange={e => setCustom(e.target.value)} />
-                    <button className="btn btn-yellow" disabled={busy || custom.trim().length < 5} onClick={() => void action("/api/game/custom-prompts", { prompt: custom })}>Отправить вопрос</button>
+                    <button className="btn btn-yellow" disabled={busy || custom.trim().length < 5} onClick={() => void action("/api/game/custom-prompts", { prompt: custom, slot: room.round === 3 ? 1 : (room.customPromptSubmittedSlots?.includes(1) ? 2 : 1) })}>Отправить вопрос</button>
                   </>
                 ) : <p className="lead">В этом раунде вопрос придумывает лидер. Ждём его вопрос.</p>}
               </div>
@@ -294,7 +311,7 @@ function Brand({ name, score }: { name: string; score?: number }) {
       </div>
       <div className="scorebug">
         <span>{name}</span>
-        {typeof score === "number" ? <b>{score.toLocaleString("ru-RU")}</b> : null}
+        {typeof score === "number" ? <b key={score}>{score.toLocaleString("ru-RU")}</b> : null}
       </div>
     </header>
   );

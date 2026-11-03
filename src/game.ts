@@ -68,7 +68,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       const won = await casRoom(env, room.id, { status: "lobby" }, { status: "custom_writing", phase_deadline_at: deadline, round_number: 1 });
       if (won) {
         await playBotQuestions(env, { ...room, status: "custom_writing", round_number: 1 }, players);
-        await announce(env, code, "<b>Своя колода.</b>\nКаждый игрок придумывает один вопрос. На это две минуты. Автор вопроса сам на него не отвечает.", true);
+        await announce(env, code, "<b>Своя колода.</b>\nКаждый игрок придумывает два вопроса. На это две минуты. Автор не отвечает на собственные вопросы.", true);
       }
       return json({ ok: true, status: "custom_writing", round: 1 });
     }
@@ -79,6 +79,8 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   if (url.pathname === "/api/game/custom-prompts" && request.method === "POST") {
     if (room.status !== "custom_writing") return json({ error: "Сейчас вопросы не принимаются" }, 409);
     const question = String(body.prompt || "").replace(/\s+/g, " ").trim();
+    const promptSlot = room.round_number === 3 ? 1 : Number(body.slot);
+    if (![1, 2].includes(promptSlot)) return json({ error: "Укажите номер вопроса: 1 или 2" }, 400);
     if (question.length < 5 || question.length > 240) return json({ error: "Вопрос должен быть от 5 до 240 символов" }, 400);
     const writer = room.round_number === 3
       ? [...players].sort((a, b) => b.score - a.score)[0]
@@ -88,20 +90,24 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     }
     const doRoom = env.GAME_ROOMS.getByName(code);
     const saved = await doRoom.getRoundQuestions(room.round_number);
-    if (saved.some(item => Number(item.userId) === user.id)) return json({ error: "Вы уже отправили вопрос для этого раунда" }, 409);
+    if (saved.some(item => Number(item.userId) === user.id && item.promptSlot === promptSlot)) return json({ error: "Этот вопрос уже отправлен" }, 409);
     const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
       method: "POST",
       body: JSON.stringify({ prompt_text: question, locale: "ru", enabled: false }),
     });
     if (!inserted[0]?.id) return json({ error: "Не удалось сохранить вопрос" }, 500);
-    await doRoom.saveRoundQuestion({ round: room.round_number, userId: user.id, promptId: inserted[0].id });
+    await doRoom.saveRoundQuestion({ round: room.round_number, userId: user.id, promptId: inserted[0].id, promptSlot });
+    await notify(env, code, "room_changed", { code, customQuestionSubmitted: true });
     const questions = await doRoom.getRoundQuestions(room.round_number);
-    const required = room.round_number === 3 ? 1 : players.length;
+    const required = room.round_number === 3 ? 1 : players.length * 2;
+    const done = room.round_number === 3
+      ? questions.some(item => Number(item.userId) === user.id)
+      : [1, 2].every(slot => questions.some(item => Number(item.userId) === user.id && item.promptSlot === slot));
     await announce(env, code, room.round_number === 3
       ? `<b>${escapeHtml(writer.display_name)}</b> придумал(а) финальный вопрос. Сам(а) на него не отвечает.`
-      : `<b>${escapeHtml(writer.display_name)}</b> отправил(а) вопрос. Готово: <b>${questions.length}/${required}</b>.`, true);
+      : `<b>${escapeHtml(writer.display_name)}</b> отправил(а) вопрос №${promptSlot}. Готово: <b>${questions.length}/${required}</b>.`, true);
     if (questions.length >= required) await beginCustomRound(env, room, players);
-    return json({ ok: true, submitted: true, count: questions.length, total: required });
+    return json({ ok: true, submitted: done, slot: promptSlot, count: questions.length, total: required });
   }
   if (url.pathname === "/api/game/answer" && request.method === "POST") {
     const answerText = String(body.text || "").trim().toLocaleLowerCase("ru-RU");
@@ -122,6 +128,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       answer_text: answerText,
       wager: room.round_number === 3 ? Math.max(0, Math.min(Number(body.wager || 0), score)) : 0,
     }) });
+    await notify(env, code, "room_changed", { code, answerSubmitted: true });
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`);
     await announce(env, code, `Ответ принят: <b>${answers.length}/${assignments.length}</b>. Ответы останутся скрыты до голосования.`, false);
     if (answers.length >= assignments.length) await presentVoting(env, room, players, 0);
@@ -149,9 +156,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       : [];
     if (cast.length) return json({ error: "Голос уже учтён" }, 409);
     await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
-    const updatedVotes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${unitAnswerIds.join(",")})&select=answer_id,voter_telegram_id`);
-    const voterCount = new Set(updatedVotes.map(vote => Number(vote.voter_telegram_id))).size;
-    await announce(env, code, `Голос учтён: <b>${voterCount}/${expectedVoters(room.round_number, players, assignments, active.key)}</b>. Имена голосующих не публикуются.`, false);
+    await notify(env, code, "room_changed", { code, playerVoteSubmitted: true });
     const settled = await settleVoting(env, room, players, false);
     return json({ ok: true, status: settled.room.status });
   }
@@ -215,17 +220,31 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   const active = units[Number(room.voting_prompt_index || 0)] || null;
   const ownAssignments = assignments.filter(item => Number(item.player_telegram_id) === userId).sort((a, b) => (a.prompt_slot || 1) - (b.prompt_slot || 1));
   const promptIds = [...new Set(assignments.map(a => a.prompt_id))];
-  const prompts = promptIds.length ? await supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`) : [];
-  const submitted = ["voting", "round_results", "finished"].includes(room.status) ? await loadAnswers(env, room) : [];
-  const votes = submitted.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${submitted.map(a => a.id).join(",")})&select=answer_id,voter_telegram_id`) : [];
-  const myAnswers = ownAssignments.length ? await supabaseRequest<Array<{ prompt_assignment_id: string }>>(env, `answers?prompt_assignment_id=in.(${ownAssignments.map(a => a.id).join(",")})&select=prompt_assignment_id`) : [];
+  const [prompts, submitted, myAnswers] = await Promise.all([
+    promptIds.length
+      ? supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`)
+      : Promise.resolve([] as Prompt[]),
+    ["voting", "round_results", "finished"].includes(room.status)
+      ? loadAnswers(env, room)
+      : Promise.resolve([] as Answer[]),
+    ownAssignments.length
+      ? supabaseRequest<Array<{ prompt_assignment_id: string }>>(env, `answers?prompt_assignment_id=in.(${ownAssignments.map(a => a.id).join(",")})&select=prompt_assignment_id`)
+      : Promise.resolve([] as Array<{ prompt_assignment_id: string }>),
+  ]);
+  const votes = submitted.length
+    ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${submitted.map(a => a.id).join(",")})&select=answer_id,voter_telegram_id`)
+    : [];
   const pairOf = pairKeyFor(assignments);
   const names = Object.fromEntries(players.map(p => [String(p.telegram_user_id), p.display_name]));
   const revealNames = room.status === "round_results" || room.status === "finished";
   const activeAnswers = active ? submitted.filter(answer => pairOf(answer) === active.key) : [];
   const activeVotes = votes.filter(vote => activeAnswers.some(answer => answer.id === vote.answer_id));
+  const playerIdsForState = new Set(players.map(player => Number(player.telegram_user_id)));
+  const activePlayerVotes = activeVotes.filter(vote => playerIdsForState.has(Number(vote.voter_telegram_id)));
   const ownVoteTargets = votes.filter(v => Number(v.voter_telegram_id) === userId).map(v => v.answer_id);
   const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
+  const roomQuestionsCache = room.status === "custom_writing"
+    ? await env.GAME_ROOMS.getByName(room.code).getRoundQuestions(room.round_number) : [];
   const scope = chatScope(room);
   let chat: Array<{ id: number; name: string; text: string; mine: boolean; at: number }> = [];
   if (room.status === "voting") {
@@ -234,17 +253,19 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   }
   const showPrompts = room.round_number === 3
     ? ownAssignments
-    : ownAssignments.filter(a => !myAnswers.some(x => x.prompt_assignment_id === a.id)).slice(0, 1);
+    : ownAssignments.filter(a => !myAnswers.some(x => x.prompt_assignment_id === a.id));
   return {
     code: room.code,
     status: room.status,
     round: room.round_number,
     deadline: room.phase_deadline_at || null,
-    customPromptCount: room.status === "custom_writing"
-      ? (await env.GAME_ROOMS.getByName(room.code).getRoundQuestions(room.round_number)).length : 0,
+    customPromptCount: room.status === "custom_writing" ? roomQuestionsCache.length : 0,
     customPromptSubmitted: room.status === "custom_writing"
-      ? (await env.GAME_ROOMS.getByName(room.code).getRoundQuestions(room.round_number)).some(item => Number(item.userId) === userId) : false,
-    customPromptRequired: room.status === "custom_writing" ? (room.round_number === 3 ? 1 : players.length) : 0,
+      ? (room.round_number === 3
+        ? roomQuestionsCache.some(item => Number(item.userId) === userId)
+        : [1, 2].every(slot => roomQuestionsCache.some(item => Number(item.userId) === userId && item.promptSlot === slot))) : false,
+    customPromptSubmittedSlots: roomQuestionsCache.filter(item => Number(item.userId) === userId).map(item => item.promptSlot),
+    customPromptRequired: room.status === "custom_writing" ? (room.round_number === 3 ? 1 : players.length * 2) : 0,
     customPromptWriterName: room.status === "custom_writing" && room.round_number === 3
       ? ([...players].sort((a, b) => b.score - a.score)[0]?.display_name || "") : "",
     isCustomPromptWriter: room.status === "custom_writing" && (room.round_number === 3
@@ -281,7 +302,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
       voted: ownVoteTargets.includes(a.id),
       wager: a.wager || 0,
     })),
-    unitVotes: new Set(activeVotes.map(vote => Number(vote.voter_telegram_id))).size,
+    unitVotes: new Set(activePlayerVotes.map(vote => Number(vote.voter_telegram_id))).size,
     unitVotesNeeded: active ? expectedVoters(room.round_number, players, assignments, active.key) : 0,
     votesCast: ownVoteTargets.length,
     votesNeeded: units.length,
@@ -309,9 +330,8 @@ async function advanceExpiredPhase(env: Env, room: Room, players: Player[]): Pro
 }
 
 async function presentVoting(env: Env, room: Room, players: Player[], startIndex: number): Promise<Room> {
-  const assignments = await getAssignments(env, room);
+  const [assignments, answers] = await Promise.all([getAssignments(env, room), loadAnswers(env, room)]);
   const units = votingUnits(assignments, room.round_number);
-  const answers = await loadAnswers(env, room);
   const pairOf = pairKeyFor(assignments);
   let index = startIndex;
   while (index < units.length && answers.filter(answer => pairOf(answer) === units[index].key).length === 0) index += 1;
@@ -343,12 +363,74 @@ async function settleVoting(env: Env, room: Room, players: Player[], force: bool
   const pairOf = pairKeyFor(assignments);
   const unitAnswers = answers.filter(answer => pairOf(answer) === active.key);
   if (!force && unitAnswers.length) {
-    const votes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${unitAnswers.map(answer => answer.id).join(",")})&select=answer_id,voter_telegram_id`);
+    const playerIds = players.map(player => Number(player.telegram_user_id));
+    const votes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${unitAnswers.map(answer => answer.id).join(",")})&voter_telegram_id=in.(${playerIds.join(",")})&select=answer_id,voter_telegram_id`);
     const voters = new Set(votes.map(vote => Number(vote.voter_telegram_id)));
     if (voters.size < expectedVoters(room.round_number, players, assignments, active.key)) return { room, players };
   }
+  await announceQuestionResults(env, room, players, active, unitAnswers, index);
   const moved = await presentVoting(env, { ...room, status: "voting" }, players, index + 1);
   return { room: moved, players: moved.status === "round_results" ? await reloadPlayers(env, room.id) : players };
+}
+
+async function announceQuestionResults(
+  env: Env,
+  room: Room,
+  players: Player[],
+  unit: Unit,
+  answers: Answer[],
+  promptIndex: number,
+): Promise<void> {
+  if (!answers.length) return;
+  const claimed = await env.GAME_ROOMS.getByName(room.code).claimQuestionReveal(room.round_number, promptIndex);
+  if (!claimed) return;
+  const ids = answers.map(answer => answer.id);
+  const [votes, audienceVotes, audienceCounts, prompt, assignments] = await Promise.all([
+    supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id,voter_telegram_id`),
+    env.GAME_ROOMS.getByName(room.code).getAudienceVoters(room.round_number, promptIndex),
+    env.GAME_ROOMS.getByName(room.code).getAudienceCounts(room.round_number, promptIndex),
+    supabaseRequest<Prompt[]>(env, `prompts?id=eq.${unit.promptId}&select=id,prompt_text&limit=1`),
+    getAssignments(env, room),
+  ]);
+  const playerIds = new Set(players.map(player => Number(player.telegram_user_id)));
+  const playerVotes = votes.filter(vote => playerIds.has(Number(vote.voter_telegram_id)));
+  const names = new Map(players.map(player => [Number(player.telegram_user_id), player.display_name]));
+  const eligible = expectedVoters(room.round_number, players, assignments, unit.key);
+  const totalPlayerVotes = playerVotes.length;
+  const playerCounts = answers.map(answer => ({
+    answer,
+    count: playerVotes.filter(vote => vote.answer_id === answer.id).length,
+  }));
+  const audienceHigh = Math.max(0, ...Object.values(audienceCounts));
+  const audienceWinners = answers.filter(answer => audienceHigh > 0 && (audienceCounts[answer.id] || 0) === audienceHigh);
+  const audienceShare = audienceWinners.length ? Math.floor(500 / audienceWinners.length) : 0;
+  const finalHigh = Math.max(0, ...playerCounts.map(row => row.count));
+  const finalWinners = answers.filter(answer => finalHigh > 0 && (playerCounts.find(row => row.answer.id === answer.id)?.count || 0) === finalHigh);
+  const finalPool = answers.reduce((sum, answer) => sum + Math.min(Number(answer.wager || 0), 1000000), 0);
+  const finalShare = finalWinners.length ? Math.floor(finalPool / finalWinners.length) : 0;
+  const lines = answers.map(({ id, author_telegram_id, answer_text }) => {
+    const playerCount = playerCounts.find(row => row.answer.id === id)?.count || 0;
+    const audienceCount = audienceCounts[id] || 0;
+    const voters = [
+      ...playerVotes.filter(vote => vote.answer_id === id).map(vote => names.get(Number(vote.voter_telegram_id)) || "Игрок"),
+      ...audienceVotes.filter(vote => vote.answerId === id).map(vote => vote.userName),
+    ];
+    const sweep = room.round_number !== 3 && playerCount > 0 && playerCount === totalPlayerVotes && playerCount >= eligible ? 1000 : 0;
+    const audienceBonus = audienceWinners.some(answer => answer.id === id) ? audienceShare : 0;
+    const rawPoints = room.round_number === 3
+      ? -Math.min(Number(answers.find(answer => answer.id === id)?.wager || 0), 1000000) + (finalWinners.some(answer => answer.id === id) ? finalShare : 0) + audienceBonus
+      : playerCount * 1000 + sweep + audienceBonus;
+    const author = players.find(player => Number(player.telegram_user_id) === Number(author_telegram_id));
+    const points = author ? Math.max(0, author.score + rawPoints) - author.score : rawPoints;
+    const pointLabel = `${points > 0 ? "+" : ""}${points.toLocaleString("ru-RU")} очков`;
+    return `<b>${escapeHtml(names.get(Number(author_telegram_id)) || "Игрок")}</b>: «${escapeHtml(answer_text)}»\nГолоса: <b>${playerCount + audienceCount}</b> (игроки: ${playerCount}, зрители: ${audienceCount})\nКто голосовал: ${voters.length ? voters.map(escapeHtml).join(", ") : "нет голосов"}\n${pointLabel}`;
+  });
+  await announce(env, room.code, [
+    `<b>Итоги вопроса · раунд ${room.round_number}</b>`,
+    escapeHtml(prompt[0]?.prompt_text || "Вопрос"),
+    "",
+    ...lines,
+  ].join("\n\n"), false);
 }
 
 async function enterResults(env: Env, room: Room, players: Player[]): Promise<Room> {
@@ -532,33 +614,33 @@ async function playBotVotes(
   const eligibleBots = bots.filter(bot => room.round_number === 3
     || !assignments.some(item => Number(item.player_telegram_id) === Number(bot.telegram_user_id)
       && (item.pair_key || item.prompt_id) === unit.key));
-  for (const bot of eligibleBots) {
+  const allIds = options.map(answer => answer.id);
+  const botIds = eligibleBots.map(bot => Number(bot.telegram_user_id));
+  const existing = allIds.length && botIds.length
+    ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${allIds.join(",")})&voter_telegram_id=in.(${botIds.join(",")})&select=answer_id,voter_telegram_id`)
+    : [];
+  const voted = new Set(existing.map(vote => `${vote.voter_telegram_id}:${vote.answer_id}`));
+  const alreadyVoted = new Set(existing.map(vote => Number(vote.voter_telegram_id)));
+  const rows = eligibleBots.flatMap(bot => {
+    if (alreadyVoted.has(Number(bot.telegram_user_id))) return [];
     const eligibleAnswers = options.filter(answer => Number(answer.author_telegram_id) !== Number(bot.telegram_user_id));
-    if (!eligibleAnswers.length) continue;
-    const ids = eligibleAnswers.map(answer => answer.id);
-    const existing = await supabaseRequest<Vote[]>(
-      env,
-      `votes?answer_id=in.(${ids.join(",")})&voter_telegram_id=eq.${bot.telegram_user_id}&select=answer_id,voter_telegram_id`,
-    );
-    if (existing.length) continue;
+    if (!eligibleAnswers.length) return [];
     const pickIndex = Math.abs(Number(bot.telegram_user_id) + room.round_number * 19 + index * 7) % eligibleAnswers.length;
     const picked = eligibleAnswers[pickIndex];
-    await supabaseRequest(env, "votes", {
-      method: "POST",
-      body: JSON.stringify({
-        answer_id: picked.id,
-        prompt_id: picked.prompt_id,
-        voter_telegram_id: Number(bot.telegram_user_id),
-      }),
-    });
+    return voted.has(`${bot.telegram_user_id}:${picked.id}`) ? [] : [{
+      answer_id: picked.id, prompt_id: picked.prompt_id, voter_telegram_id: Number(bot.telegram_user_id),
+    }];
+  });
+  if (rows.length) {
+    await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify(rows) });
+    await notify(env, room.code, "room_changed", { code: room.code, botVotes: rows.length });
   }
-  await notify(env, room.code, "room_changed", { code: room.code, botVotes: eligibleBots.length });
 }
 
-function botQuestion(bot: Player, round: number): string {
+function botQuestion(bot: Player, round: number, slot = 1): string {
   const subjects = ["на вечеринке", "в семейном чате", "на первом свидании", "в офисе в понедельник", "во время важного собеседования", "в отпуске с друзьями", "на свадьбе", "в очереди за кофе"];
   const twists = ["Что самое нелепое может пойти не так", "Какой самый странный поступок можно совершить", "Как объяснить окружающим, почему внезапно", "Что гарантированно превратит обычный день в легенду", "Какой секрет лучше никогда не раскрывать", "Как выкрутиться, если внезапно выяснилось"];
-  const seed = Math.abs(Number(bot.telegram_user_id)) + round * 31;
+  const seed = Math.abs(Number(bot.telegram_user_id)) + round * 31 + slot * 13;
   return `${twists[seed % twists.length]} ${subjects[Math.floor(seed / 7) % subjects.length]}?`;
 }
 
@@ -569,18 +651,21 @@ async function playBotQuestions(env: Env, room: Room, players: Player[]): Promis
   if (!writers.length) return;
   const doRoom = env.GAME_ROOMS.getByName(room.code);
   const existing = await doRoom.getRoundQuestions(round);
-  const submitted = new Set(existing.map(item => Number(item.userId)));
-  for (const bot of writers) {
-    if (submitted.has(Number(bot.telegram_user_id))) continue;
+  const submitted = new Set(existing.map(item => `${item.userId}:${item.promptSlot}`));
+  const slots = round === 3 ? [1] : [1, 2];
+  const pending = writers.flatMap(bot => slots
+    .filter(slot => !submitted.has(`${bot.telegram_user_id}:${slot}`))
+    .map(slot => ({ bot, slot })));
+  const created = await Promise.all(pending.map(async ({ bot, slot }) => {
     const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
       method: "POST",
-      body: JSON.stringify({ prompt_text: botQuestion(bot, round), locale: "ru", enabled: false }),
+      body: JSON.stringify({ prompt_text: botQuestion(bot, round, slot), locale: "ru", enabled: false }),
     });
-    if (!inserted[0]?.id) continue;
-    await doRoom.saveRoundQuestion({ round, userId: Number(bot.telegram_user_id), promptId: inserted[0].id });
-    submitted.add(Number(bot.telegram_user_id));
-  }
-  await notify(env, room.code, "room_changed", { code: room.code, botQuestions: writers.length });
+    return inserted[0]?.id ? { userId: Number(bot.telegram_user_id), promptId: inserted[0].id, slot } : null;
+  }));
+  await Promise.all(created.filter((item): item is NonNullable<typeof item> => Boolean(item)).map(item =>
+    doRoom.saveRoundQuestion({ round, userId: item.userId, promptId: item.promptId, promptSlot: item.slot })));
+  if (created.some(Boolean)) await notify(env, room.code, "room_changed", { code: room.code, botQuestions: created.filter(Boolean).length });
 }
 
 async function beginCustomRound(env: Env, room: Room, players: Player[]): Promise<void> {
@@ -589,21 +674,25 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   let questions = await doRoom.getRoundQuestions(round);
   const leader = [...players].sort((a, b) => b.score - a.score)[0];
   const writers = round === 3 ? (leader ? [leader] : []) : players;
-  const byAuthor = new Map(questions.map(item => [Number(item.userId), item]));
-  for (const writer of writers) {
-    if (byAuthor.has(Number(writer.telegram_user_id))) continue;
-    const fallback = await supabaseRequest<Prompt[]>(env, "prompts", {
+  const slots = round === 3 ? [1] : [1, 2];
+  const submitted = new Set(questions.map(item => `${item.userId}:${item.promptSlot}`));
+  const missing = writers.flatMap(writer => slots
+    .filter(slot => !submitted.has(`${writer.telegram_user_id}:${slot}`))
+    .map(slot => ({ writer, slot })));
+  const fallbacks = await Promise.all(missing.map(async ({ writer, slot }) => {
+    const text = round === 3
+      ? "Какой поступок гарантированно превратит обычный день в легенду?"
+      : slot === 1
+        ? "Что самое нелепое может случиться на вечеринке?"
+        : "Как выкрутиться, если случайно отправил сообщение не в тот чат?";
+    const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
       method: "POST",
-      body: JSON.stringify({
-        prompt_text: round === 3 ? "Какой поступок гарантированно превратит обычный день в легенду?" : "Что самое нелепое может случиться на вечеринке?",
-        locale: "ru", enabled: false,
-      }),
+      body: JSON.stringify({ prompt_text: text, locale: "ru", enabled: false }),
     });
-    if (fallback[0]?.id) {
-      await doRoom.saveRoundQuestion({ round, userId: Number(writer.telegram_user_id), promptId: fallback[0].id });
-      byAuthor.set(Number(writer.telegram_user_id), { userId: Number(writer.telegram_user_id), promptId: fallback[0].id });
-    }
-  }
+    return inserted[0]?.id ? { userId: Number(writer.telegram_user_id), promptId: inserted[0].id, slot } : null;
+  }));
+  await Promise.all(fallbacks.filter((item): item is NonNullable<typeof item> => Boolean(item)).map(item =>
+    doRoom.saveRoundQuestion({ round, userId: item.userId, promptId: item.promptId, promptSlot: item.slot })));
   questions = await doRoom.getRoundQuestions(round);
   const existing = await supabaseRequest<Array<{ id: string }>>(env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${round}&select=id&limit=1`);
   if (existing.length) return;
@@ -612,10 +701,10 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   });
   if (!won) return;
   const rows: Array<Record<string, unknown>> = [];
-  const questionByAuthor = new Map(questions.map(item => [Number(item.userId), item]));
+  const questionBySlot = new Map(questions.map(item => [`${item.userId}:${item.promptSlot}`, item]));
   if (round === 3) {
     if (leader) {
-      const question = questionByAuthor.get(Number(leader.telegram_user_id));
+      const question = questionBySlot.get(`${leader.telegram_user_id}:1`);
       if (question) for (const player of players) {
         if (Number(player.telegram_user_id) === Number(leader.telegram_user_id)) continue;
         rows.push({ room_id: room.id, round_number: round, prompt_id: question.promptId, player_telegram_id: player.telegram_user_id, pair_key: "final", prompt_slot: 1 });
@@ -624,18 +713,21 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   } else {
     for (let index = 0; index < players.length; index++) {
       const writer = players[index];
-      const question = questionByAuthor.get(Number(writer.telegram_user_id));
-      if (!question) continue;
-      const respondents = [players[(index + 1) % players.length], players[(index + 2) % players.length]];
-      const pairKey = `custom-${round}-${writer.telegram_user_id}`;
-      for (const player of respondents) rows.push({
-        room_id: room.id, round_number: round, prompt_id: question.promptId,
-        player_telegram_id: player.telegram_user_id, pair_key: pairKey, prompt_slot: 1,
-      });
+      for (const slot of [1, 2]) {
+        const question = questionBySlot.get(`${writer.telegram_user_id}:${slot}`);
+        if (!question) continue;
+        const offset = slot === 1 ? 1 : 2;
+        const respondents = [players[(index + offset) % players.length], players[(index + offset + 1) % players.length]];
+        const pairKey = `custom-${round}-${writer.telegram_user_id}-${slot}`;
+        for (const player of respondents) rows.push({
+          room_id: room.id, round_number: round, prompt_id: question.promptId,
+          player_telegram_id: player.telegram_user_id, pair_key: pairKey, prompt_slot: slot,
+        });
+      }
     }
   }
   if (rows.length) await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
-  const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. На каждый вопрос отвечают два игрока, кроме автора.`;
+  const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. Каждый игрок задал два вопроса; на каждый отвечают два игрока, кроме автора.`;
   await announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true);
   await notify(env, room.code, "next_round", { round });
   await playBotAnswers(env, room, players);
@@ -720,7 +812,8 @@ async function ensurePromptPool(env: Env, room: Room, needed: number): Promise<P
 async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promise<void> {
   const answers = await loadAnswers(env, room);
   const answerIds = answers.map(a => a.id);
-  const votes = answerIds.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${answerIds.join(",")})&select=answer_id,voter_telegram_id`) : [];
+  const playerIds = players.map(player => Number(player.telegram_user_id));
+  const votes = answerIds.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${answerIds.join(",")})&voter_telegram_id=in.(${playerIds.join(",")})&select=answer_id,voter_telegram_id`) : [];
   const earned = new Map<number, number>();
   if (room.round_number === 3) {
     const pool = answers.reduce((sum, a) => sum + Math.min(Number(a.wager || 0), 1000000), 0);
@@ -740,9 +833,9 @@ async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promis
       const options = answers.filter(answer => pairOf(answer) === key);
       const counts = options.map(answer => ({ answer, count: votes.filter(v => v.answer_id === answer.id).length }));
       const total = counts.reduce((sum, row) => sum + row.count, 0);
-      const audience = Math.max(1, players.length - new Set(options.map(answer => Number(answer.author_telegram_id))).size);
+      const eligibleVoters = expectedVoters(room.round_number, players, assignments, key);
       for (const row of counts) {
-        const sweep = total > 0 && row.count === total && row.count >= audience ? 1000 : 0;
+        const sweep = total > 0 && row.count === total && row.count >= eligibleVoters ? 1000 : 0;
         const points = row.count * 1000 + sweep;
         const author = Number(row.answer.author_telegram_id);
         earned.set(author, (earned.get(author) || 0) + points);
