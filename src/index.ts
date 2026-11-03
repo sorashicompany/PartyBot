@@ -61,19 +61,6 @@ export default {
         return Response.json({ ok: true });
       }
 
-      if (url.pathname === "/api/rooms/spectate" && request.method === "POST") {
-        const user = await authenticateMiniApp(request, env.BOT_TOKEN).catch(() => null);
-        if (!user) return Response.json({ error: "Unauthorized Telegram session" }, { status: 401, headers: corsHeaders });
-        const body = await request.json() as { code?: string };
-        const code = (body.code || "").toUpperCase();
-        if (!/^[A-HJ-NP-Z2-9]{5}$/.test(code)) return Response.json({ error: "Invalid room code" }, { status: 400, headers: corsHeaders });
-        const rooms = await supabaseRequest<Array<{ code: string; status: string }>>(env, `rooms?code=eq.${code}&select=code,status&limit=1`);
-        const room = rooms[0];
-        if (!room || ["finished", "cancelled"].includes(room.status)) return Response.json({ error: "Комната не найдена или уже закрыта" }, { status: 404, headers: corsHeaders });
-        const ticket = await createRoomTicket(env, code, user.id);
-        return Response.json({ ok: true, code, ticket, displayName: user.first_name, spectator: true }, { headers: corsHeaders });
-      }
-
       if (url.pathname === "/api/rooms/join" && request.method === "POST") {
         const user = await authenticateMiniApp(request, env.BOT_TOKEN).catch(() => null);
         if (!user) return Response.json({ error: "Unauthorized Telegram session" }, { status: 401, headers: corsHeaders });
