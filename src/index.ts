@@ -79,11 +79,12 @@ export default {
           if (existingPlayer.display_name !== name) {
             await supabaseRequest(env, `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${user.id}`, { method: "PATCH", body: JSON.stringify({ display_name: name }) });
           }
-        } else {
-          if (room.status !== "lobby") return Response.json({ error: "Шоу уже началось" }, { status: 409, headers: corsHeaders });
+        } else if (room.status === "lobby") {
           if (players.length >= 10) return Response.json({ error: "Зал полон" }, { status: 409, headers: corsHeaders });
           await supabaseRequest(env, "room_players", { method: "POST", body: JSON.stringify({ room_id: room.id, telegram_user_id: user.id, display_name: name }) });
           ctx.waitUntil(announceJoin(env, room.code, name, players.length + 1));
+        } else if (!["custom_writing", "answering", "voting", "question_results", "round_results"].includes(room.status)) {
+          return Response.json({ error: "Шоу уже завершено" }, { status: 409, headers: corsHeaders });
         }
         const ticket = await createRoomTicket(env, room.code, user.id);
         const stub = env.GAME_ROOMS.getByName(room.code);
