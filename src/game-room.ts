@@ -39,6 +39,11 @@ export class GameRoom extends DurableObject<Env> {
         created_at INTEGER NOT NULL,
         PRIMARY KEY (round, prompt_index, user_id)
       )`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS player_vote_claims (
+        round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, user_id INTEGER NOT NULL,
+        answer_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (round, prompt_index, user_id)
+      )`);
       this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS audience_vote_names (
         round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, user_id INTEGER NOT NULL,
         answer_id TEXT NOT NULL, user_name TEXT NOT NULL, created_at INTEGER NOT NULL,
@@ -146,6 +151,26 @@ export class GameRoom extends DurableObject<Env> {
     const messages = this.readChat(scope, input.userId);
     await this.broadcast("chat", { scope, messages });
     return { messages };
+  }
+
+  async claimPlayerVote(input: { round: number; promptIndex: number; userId: number; answerId: string }): Promise<boolean> {
+    const existing = this.ctx.storage.sql.exec(
+      `SELECT answer_id FROM player_vote_claims WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    ).toArray();
+    if (existing.length) return false;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO player_vote_claims (round, prompt_index, user_id, answer_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+      input.round, input.promptIndex, input.userId, input.answerId, Date.now(),
+    );
+    return true;
+  }
+
+  async rollbackPlayerVote(input: { round: number; promptIndex: number; userId: number }): Promise<void> {
+    this.ctx.storage.sql.exec(
+      `DELETE FROM player_vote_claims WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    );
   }
 
   async castAudienceVote(input: { round: number; promptIndex: number; userId: number; answerId: string; userName?: string }): Promise<{ ok: boolean; counts: Record<string, number>; error?: string }> {
