@@ -39,6 +39,10 @@ export class GameRoom extends DurableObject<Env> {
         created_at INTEGER NOT NULL,
         PRIMARY KEY (round, prompt_index, user_id)
       )`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS round_questions (
+        round INTEGER NOT NULL, user_id INTEGER NOT NULL, prompt_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (round, user_id)
+      )`);
       this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS round_awards (
         round INTEGER PRIMARY KEY,
         awarded_at INTEGER NOT NULL
@@ -159,6 +163,20 @@ export class GameRoom extends DurableObject<Env> {
       round, promptIndex,
     ).toArray() as Array<{ answer_id: string; votes: number }>;
     return Object.fromEntries(rows.map(row => [String(row.answer_id), Number(row.votes)]));
+  }
+
+  async saveRoundQuestion(input: { round: number; userId: number; promptId: string }): Promise<void> {
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO round_questions (round, user_id, prompt_id, created_at) VALUES (?, ?, ?, ?)`,
+      input.round, input.userId, input.promptId, Date.now(),
+    );
+  }
+
+  async getRoundQuestions(round: number): Promise<Array<{ userId: number; promptId: string }>> {
+    const rows = this.ctx.storage.sql.exec(
+      `SELECT user_id, prompt_id FROM round_questions WHERE round = ? ORDER BY created_at ASC`, round,
+    ).toArray() as Array<{ user_id: number; prompt_id: string }>;
+    return rows.map(row => ({ userId: Number(row.user_id), promptId: String(row.prompt_id) }));
   }
 
   async claimRoundAward(round: number): Promise<boolean> {
