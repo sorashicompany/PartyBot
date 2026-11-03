@@ -284,10 +284,9 @@ function Brand({ name, score }: { name: string; score?: number }) {
   return (
     <header className="topbar">
       <div className="brand-lockup">
-        <div className="host" aria-hidden="true"><span /><span /><i /></div>
         <div>
-          <div className="brand">Сораши <span>Пати</span></div>
-          <p className="mode">острослов</p>
+          <div className="brand">SORASHI<span>PARTY</span>FUNBOT</div>
+          <p className="mode">QUIPLASH · LIVE ROOM</p>
         </div>
       </div>
       <div className="scorebug">{name}{typeof score === "number" ? ` · ${score.toLocaleString("ru-RU")}` : ""}</div>
