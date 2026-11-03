@@ -253,7 +253,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
         ? roomQuestionsCache.some(item => Number(item.userId) === userId)
         : [1, 2].every(slot => roomQuestionsCache.some(item => Number(item.userId) === userId && item.promptSlot === slot))) : false,
     customPromptSubmittedSlots: roomQuestionsCache.filter(item => Number(item.userId) === userId).map(item => item.promptSlot),
-    customPromptRequired: room.status === "custom_writing" ? (room.round_number === 3 ? 1 : players.length) : 0,
+    customPromptRequired: room.status === "custom_writing" ? (room.round_number === 3 ? 1 : players.length * 2) : 0,
     customPromptWriterName: room.status === "custom_writing" && room.round_number === 3
       ? ([...players].sort((a, b) => b.score - a.score)[0]?.display_name || "") : "",
     isCustomPromptWriter: room.status === "custom_writing" && (room.round_number === 3
@@ -352,7 +352,8 @@ async function settleVoting(env: Env, room: Room, players: Player[], force: bool
   const pairOf = pairKeyFor(assignments);
   const unitAnswers = answers.filter(answer => pairOf(answer) === active.key);
   if (!force && unitAnswers.length) {
-    const votes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${unitAnswers.map(answer => answer.id).join(",")})&select=answer_id,voter_telegram_id`);
+    const playerIds = players.map(player => Number(player.telegram_user_id));
+    const votes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${unitAnswers.map(answer => answer.id).join(",")})&voter_telegram_id=in.(${playerIds.join(",")})&select=answer_id,voter_telegram_id`);
     const voters = new Set(votes.map(vote => Number(vote.voter_telegram_id)));
     if (voters.size < expectedVoters(room.round_number, players, assignments, active.key)) return { room, players };
   }
@@ -541,27 +542,27 @@ async function playBotVotes(
   const eligibleBots = bots.filter(bot => room.round_number === 3
     || !assignments.some(item => Number(item.player_telegram_id) === Number(bot.telegram_user_id)
       && (item.pair_key || item.prompt_id) === unit.key));
-  for (const bot of eligibleBots) {
+  const allIds = options.map(answer => answer.id);
+  const botIds = eligibleBots.map(bot => Number(bot.telegram_user_id));
+  const existing = allIds.length && botIds.length
+    ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${allIds.join(",")})&voter_telegram_id=in.(${botIds.join(",")})&select=answer_id,voter_telegram_id`)
+    : [];
+  const voted = new Set(existing.map(vote => `${vote.voter_telegram_id}:${vote.answer_id}`));
+  const alreadyVoted = new Set(existing.map(vote => Number(vote.voter_telegram_id)));
+  const rows = eligibleBots.flatMap(bot => {
+    if (alreadyVoted.has(Number(bot.telegram_user_id))) return [];
     const eligibleAnswers = options.filter(answer => Number(answer.author_telegram_id) !== Number(bot.telegram_user_id));
-    if (!eligibleAnswers.length) continue;
-    const ids = eligibleAnswers.map(answer => answer.id);
-    const existing = await supabaseRequest<Vote[]>(
-      env,
-      `votes?answer_id=in.(${ids.join(",")})&voter_telegram_id=eq.${bot.telegram_user_id}&select=answer_id,voter_telegram_id`,
-    );
-    if (existing.length) continue;
+    if (!eligibleAnswers.length) return [];
     const pickIndex = Math.abs(Number(bot.telegram_user_id) + room.round_number * 19 + index * 7) % eligibleAnswers.length;
     const picked = eligibleAnswers[pickIndex];
-    await supabaseRequest(env, "votes", {
-      method: "POST",
-      body: JSON.stringify({
-        answer_id: picked.id,
-        prompt_id: picked.prompt_id,
-        voter_telegram_id: Number(bot.telegram_user_id),
-      }),
-    });
+    return voted.has(`${bot.telegram_user_id}:${picked.id}`) ? [] : [{
+      answer_id: picked.id, prompt_id: picked.prompt_id, voter_telegram_id: Number(bot.telegram_user_id),
+    }];
+  });
+  if (rows.length) {
+    await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify(rows) });
+    await notify(env, room.code, "room_changed", { code: room.code, botVotes: rows.length });
   }
-  await notify(env, room.code, "room_changed", { code: room.code, botVotes: eligibleBots.length });
 }
 
 function botQuestion(bot: Player, round: number, slot = 1): string {
@@ -739,7 +740,8 @@ async function ensurePromptPool(env: Env, room: Room, needed: number): Promise<P
 async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promise<void> {
   const answers = await loadAnswers(env, room);
   const answerIds = answers.map(a => a.id);
-  const votes = answerIds.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${answerIds.join(",")})&select=answer_id,voter_telegram_id`) : [];
+  const playerIds = players.map(player => Number(player.telegram_user_id));
+  const votes = answerIds.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${answerIds.join(",")})&voter_telegram_id=in.(${playerIds.join(",")})&select=answer_id,voter_telegram_id`) : [];
   const earned = new Map<number, number>();
   if (room.round_number === 3) {
     const pool = answers.reduce((sum, a) => sum + Math.min(Number(a.wager || 0), 1000000), 0);
