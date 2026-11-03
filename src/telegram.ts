@@ -197,7 +197,7 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
 
 async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
   const data = String(query.data || "");
-  const match = /^aud\\|([A-HJ-NP-Z2-9]{5})\\|(\\d+)\\|(\\d+)\\|([0-9a-f-]{20,40})$/i.exec(data);
+  const match = /^aud\|([A-HJ-NP-Z2-9]{5})\|(\d+)\|(\d+)\|([0-9a-f-]{20,40})$/i.exec(data);
   const message = query.message;
   const ack = async (text = "") => {
     const response = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/answerCallbackQuery`, {
