@@ -41,7 +41,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   if (url.pathname === "/api/game/start" && request.method === "POST") {
     if (Number(room.host_telegram_id) !== user.id) return json({ error: "Only the host can start" }, 403);
     if (room.status !== "lobby") return json({ error: "Game already started" }, 409);
-    if (players.length < 4 || players.length > 10) return json({ error: "A game requires 4–10 players" }, 409);
+    if (players.length < 3 || players.length > 10) return json({ error: "A game requires 3–10 players" }, 409);
     if (room.custom_prompts_enabled) {
       const deadline = new Date(Date.now() + 120000).toISOString();
       await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "custom_writing", phase_deadline_at: deadline, updated_at: new Date().toISOString() }) });
