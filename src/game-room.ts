@@ -39,9 +39,10 @@ export class GameRoom extends DurableObject<Env> {
         created_at INTEGER NOT NULL,
         PRIMARY KEY (round, prompt_index, user_id)
       )`);
-      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS round_questions (
-        round INTEGER NOT NULL, user_id INTEGER NOT NULL, prompt_id TEXT NOT NULL, created_at INTEGER NOT NULL,
-        PRIMARY KEY (round, user_id)
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS round_question_slots (
+        round INTEGER NOT NULL, user_id INTEGER NOT NULL, prompt_slot INTEGER NOT NULL,
+        prompt_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (round, user_id, prompt_slot)
       )`);
       this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS round_awards (
         round INTEGER PRIMARY KEY,
@@ -165,18 +166,19 @@ export class GameRoom extends DurableObject<Env> {
     return Object.fromEntries(rows.map(row => [String(row.answer_id), Number(row.votes)]));
   }
 
-  async saveRoundQuestion(input: { round: number; userId: number; promptId: string }): Promise<void> {
+  async saveRoundQuestion(input: { round: number; userId: number; promptId: string; promptSlot?: number }): Promise<void> {
+    const slot = Math.max(1, Math.min(2, Math.trunc(input.promptSlot || 1)));
     this.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO round_questions (round, user_id, prompt_id, created_at) VALUES (?, ?, ?, ?)`,
-      input.round, input.userId, input.promptId, Date.now(),
+      `INSERT OR IGNORE INTO round_question_slots (round, user_id, prompt_slot, prompt_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+      input.round, input.userId, slot, input.promptId, Date.now(),
     );
   }
 
-  async getRoundQuestions(round: number): Promise<Array<{ userId: number; promptId: string }>> {
+  async getRoundQuestions(round: number): Promise<Array<{ userId: number; promptId: string; promptSlot: number }>> {
     const rows = this.ctx.storage.sql.exec(
-      `SELECT user_id, prompt_id FROM round_questions WHERE round = ? ORDER BY created_at ASC`, round,
-    ).toArray() as Array<{ user_id: number; prompt_id: string }>;
-    return rows.map(row => ({ userId: Number(row.user_id), promptId: String(row.prompt_id) }));
+      `SELECT user_id, prompt_id, prompt_slot FROM round_question_slots WHERE round = ? ORDER BY created_at ASC`, round,
+    ).toArray() as Array<{ user_id: number; prompt_id: string; prompt_slot: number }>;
+    return rows.map(row => ({ userId: Number(row.user_id), promptId: String(row.prompt_id), promptSlot: Number(row.prompt_slot) }));
   }
 
   async claimRoundAward(round: number): Promise<boolean> {
