@@ -401,7 +401,10 @@ async function presentVoting(env: Env, room: Room, players: Player[], startIndex
     notify(env, room.code, "voting_started", { round: room.round_number, index }),
     playBotVotes(env, next, players, assignments, answers, units, index),
   ]);
-  return next;
+  // If the remaining voters are bots, settle immediately instead of waiting
+  // for the voting timer to expire.
+  const settled = await settleVoting(env, next, players, false);
+  return settled.room;
 }
 
 async function settleVoting(env: Env, room: Room, players: Player[], force: boolean): Promise<{ room: Room; players: Player[] }> {
@@ -663,6 +666,13 @@ async function playBotAnswers(env: Env, room: Room, players: Player[]): Promise<
   if (rows.length) {
     await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify(rows) });
     await notify(env, room.code, "room_changed", { code: room.code, botAnswers: rows.length });
+  }
+  const currentAnswers = await supabaseRequest<Array<{ id: string }>>(
+    env,
+    `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`,
+  );
+  if (currentAnswers.length >= assignments.length && assignments.length > 0) {
+    await presentVoting(env, room, players, 0);
   }
 }
 
