@@ -578,18 +578,21 @@ async function playBotQuestions(env: Env, room: Room, players: Player[]): Promis
   if (!writers.length) return;
   const doRoom = env.GAME_ROOMS.getByName(room.code);
   const existing = await doRoom.getRoundQuestions(round);
-  const submitted = new Set(existing.map(item => Number(item.userId)));
-  for (const bot of writers) {
-    if (submitted.has(Number(bot.telegram_user_id))) continue;
+  const submitted = new Set(existing.map(item => `${item.userId}:${item.promptSlot}`));
+  const slots = round === 3 ? [1] : [1, 2];
+  const pending = writers.flatMap(bot => slots
+    .filter(slot => !submitted.has(`${bot.telegram_user_id}:${slot}`))
+    .map(slot => ({ bot, slot })));
+  const created = await Promise.all(pending.map(async ({ bot, slot }) => {
     const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
       method: "POST",
-      body: JSON.stringify({ prompt_text: botQuestion(bot, round), locale: "ru", enabled: false }),
+      body: JSON.stringify({ prompt_text: botQuestion(bot, round, slot), locale: "ru", enabled: false }),
     });
-    if (!inserted[0]?.id) continue;
-    await doRoom.saveRoundQuestion({ round, userId: Number(bot.telegram_user_id), promptId: inserted[0].id });
-    submitted.add(Number(bot.telegram_user_id));
-  }
-  await notify(env, room.code, "room_changed", { code: room.code, botQuestions: writers.length });
+    return inserted[0]?.id ? { userId: Number(bot.telegram_user_id), promptId: inserted[0].id, slot } : null;
+  }));
+  await Promise.all(created.filter((item): item is NonNullable<typeof item> => Boolean(item)).map(item =>
+    doRoom.saveRoundQuestion({ round, userId: item.userId, promptId: item.promptId, promptSlot: item.slot })));
+  if (created.some(Boolean)) await notify(env, room.code, "room_changed", { code: room.code, botQuestions: created.filter(Boolean).length });
 }
 
 async function beginCustomRound(env: Env, room: Room, players: Player[]): Promise<void> {
@@ -598,21 +601,25 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   let questions = await doRoom.getRoundQuestions(round);
   const leader = [...players].sort((a, b) => b.score - a.score)[0];
   const writers = round === 3 ? (leader ? [leader] : []) : players;
-  const byAuthor = new Map(questions.map(item => [Number(item.userId), item]));
-  for (const writer of writers) {
-    if (byAuthor.has(Number(writer.telegram_user_id))) continue;
-    const fallback = await supabaseRequest<Prompt[]>(env, "prompts", {
+  const slots = round === 3 ? [1] : [1, 2];
+  const submitted = new Set(questions.map(item => `${item.userId}:${item.promptSlot}`));
+  const missing = writers.flatMap(writer => slots
+    .filter(slot => !submitted.has(`${writer.telegram_user_id}:${slot}`))
+    .map(slot => ({ writer, slot })));
+  const fallbacks = await Promise.all(missing.map(async ({ writer, slot }) => {
+    const text = round === 3
+      ? "Какой поступок гарантированно превратит обычный день в легенду?"
+      : slot === 1
+        ? "Что самое нелепое может случиться на вечеринке?"
+        : "Как выкрутиться, если случайно отправил сообщение не в тот чат?";
+    const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
       method: "POST",
-      body: JSON.stringify({
-        prompt_text: round === 3 ? "Какой поступок гарантированно превратит обычный день в легенду?" : "Что самое нелепое может случиться на вечеринке?",
-        locale: "ru", enabled: false,
-      }),
+      body: JSON.stringify({ prompt_text: text, locale: "ru", enabled: false }),
     });
-    if (fallback[0]?.id) {
-      await doRoom.saveRoundQuestion({ round, userId: Number(writer.telegram_user_id), promptId: fallback[0].id });
-      byAuthor.set(Number(writer.telegram_user_id), { userId: Number(writer.telegram_user_id), promptId: fallback[0].id });
-    }
-  }
+    return inserted[0]?.id ? { userId: Number(writer.telegram_user_id), promptId: inserted[0].id, slot } : null;
+  }));
+  await Promise.all(fallbacks.filter((item): item is NonNullable<typeof item> => Boolean(item)).map(item =>
+    doRoom.saveRoundQuestion({ round, userId: item.userId, promptId: item.promptId, promptSlot: item.slot })));
   questions = await doRoom.getRoundQuestions(round);
   const existing = await supabaseRequest<Array<{ id: string }>>(env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${round}&select=id&limit=1`);
   if (existing.length) return;
@@ -621,10 +628,10 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   });
   if (!won) return;
   const rows: Array<Record<string, unknown>> = [];
-  const questionByAuthor = new Map(questions.map(item => [Number(item.userId), item]));
+  const questionBySlot = new Map(questions.map(item => [`${item.userId}:${item.promptSlot}`, item]));
   if (round === 3) {
     if (leader) {
-      const question = questionByAuthor.get(Number(leader.telegram_user_id));
+      const question = questionBySlot.get(`${leader.telegram_user_id}:1`);
       if (question) for (const player of players) {
         if (Number(player.telegram_user_id) === Number(leader.telegram_user_id)) continue;
         rows.push({ room_id: room.id, round_number: round, prompt_id: question.promptId, player_telegram_id: player.telegram_user_id, pair_key: "final", prompt_slot: 1 });
@@ -633,18 +640,21 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   } else {
     for (let index = 0; index < players.length; index++) {
       const writer = players[index];
-      const question = questionByAuthor.get(Number(writer.telegram_user_id));
-      if (!question) continue;
-      const respondents = [players[(index + 1) % players.length], players[(index + 2) % players.length]];
-      const pairKey = `custom-${round}-${writer.telegram_user_id}`;
-      for (const player of respondents) rows.push({
-        room_id: room.id, round_number: round, prompt_id: question.promptId,
-        player_telegram_id: player.telegram_user_id, pair_key: pairKey, prompt_slot: 1,
-      });
+      for (const slot of [1, 2]) {
+        const question = questionBySlot.get(`${writer.telegram_user_id}:${slot}`);
+        if (!question) continue;
+        const offset = slot === 1 ? 1 : 2;
+        const respondents = [players[(index + offset) % players.length], players[(index + offset + 1) % players.length]];
+        const pairKey = `custom-${round}-${writer.telegram_user_id}-${slot}`;
+        for (const player of respondents) rows.push({
+          room_id: room.id, round_number: round, prompt_id: question.promptId,
+          player_telegram_id: player.telegram_user_id, pair_key: pairKey, prompt_slot: slot,
+        });
+      }
     }
   }
   if (rows.length) await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
-  const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. На каждый вопрос отвечают два игрока, кроме автора.`;
+  const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. Каждый игрок задал два вопроса; на каждый отвечают два игрока, кроме автора.`;
   await announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true);
   await notify(env, room.code, "next_round", { round });
   await playBotAnswers(env, room, players);
