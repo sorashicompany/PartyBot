@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 type TelegramApp = {
   initData?: string;
@@ -25,6 +25,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
   const [answer, setAnswer] = useState("");
   const [wager, setWager] = useState(0);
   const [refresh, setRefresh] = useState(0);
+  const autoJoinAttempted = useRef(false);
 
   const api = useCallback(async (path: string, method: "GET" | "POST" = "GET", payload?: Record<string, unknown>) => {
     const response = await fetch(path, {
@@ -72,6 +73,13 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
       window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("error");
     } finally { setBusy(false); }
   };
+
+  useEffect(() => {
+    if (!room && initData && /^[A-HJ-NP-Z2-9]{5}$/i.test(startCode) && !autoJoinAttempted.current) {
+      autoJoinAttempted.current = true;
+      void join();
+    }
+  }, [startCode, initData]);
 
   const action = async (path: string, payload: Record<string, unknown> = {}) => {
     if (!room) return;
