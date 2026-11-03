@@ -886,3 +886,16 @@
   .duel { grid-template-columns: 1fr; }
   .quip { min-height: 8rem; }
 }
+
+/* Live Mini App content surface: PartyGame2 keeps the stage open rather than
+   placing the whole show inside the old purple rounded panel. */
+* { box-sizing: border-box; }
+.sheet {
+  width: min(100%, 52rem);
+  margin: clamp(1rem, 4vh, 2.5rem) auto 1rem;
+  padding: clamp(.25rem, 2vw, 1.25rem);
+  display: block;
+  color: var(--color-cream);
+}
+.sheet.wide { width: min(100%, 68rem); }
+.lead, .sub { margin: .25rem 0 .75rem; }
