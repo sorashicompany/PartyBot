@@ -244,6 +244,30 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   const activePlayerVotes = activeVotes.filter(vote => playerIdsForState.has(Number(vote.voter_telegram_id)));
   const ownVoteTargets = votes.filter(v => Number(v.voter_telegram_id) === userId).map(v => v.answer_id);
   const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
+  const audienceRows = room.status === "question_results"
+    ? await env.GAME_ROOMS.getByName(room.code).getAudienceVoters(room.round_number, Number(room.voting_prompt_index || 0))
+    : [];
+  const audienceNameById = new Map(audienceRows.map(row => [row.userId, row.userName]));
+  const audienceCounts = room.status === "question_results"
+    ? await env.GAME_ROOMS.getByName(room.code).getAudienceCounts(room.round_number, Number(room.voting_prompt_index || 0))
+    : {};
+  const resultPoints = new Map<string, number>();
+  if (room.status === "question_results" && room.round_number !== 3 && active) {
+    const playerVoteRows = activeVotes.filter(vote => playerIdsForState.has(Number(vote.voter_telegram_id)));
+    const totalPlayerVotes = playerVoteRows.length;
+    const eligible = expectedVoters(room.round_number, players, assignments, active.key);
+    const audienceHigh = Math.max(0, ...Object.values(audienceCounts));
+    const audienceWinners = activeAnswers.filter(answer => audienceHigh > 0 && (audienceCounts[answer.id] || 0) === audienceHigh);
+    const audienceShare = audienceWinners.length ? Math.floor(500 / audienceWinners.length) : 0;
+    for (const answerItem of activeAnswers) {
+      const playerCount = playerVoteRows.filter(vote => vote.answer_id === answerItem.id).length;
+      const sweep = playerCount > 0 && playerCount === totalPlayerVotes && playerCount >= eligible ? 1000 : 0;
+      const audienceBonus = audienceWinners.some(item => item.id === answerItem.id) ? audienceShare : 0;
+      const raw = playerCount * 1000 + sweep + audienceBonus;
+      const author = players.find(player => Number(player.telegram_user_id) === Number(answerItem.author_telegram_id));
+      resultPoints.set(answerItem.id, author ? Math.max(0, author.score + raw) - author.score : raw);
+    }
+  }
   const roomQuestionsCache = room.status === "custom_writing"
     ? await env.GAME_ROOMS.getByName(room.code).getRoundQuestions(room.round_number) : [];
   const scope = chatScope(room);
@@ -300,6 +324,9 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
       name: revealNames ? names[String(a.author_telegram_id)] : undefined,
       own: Number(a.author_telegram_id) === userId,
       votes: voteCounts[a.id] || 0,
+      voters: revealNames ? votes.filter(vote => vote.answer_id === a.id).map(vote =>
+        names[String(vote.voter_telegram_id)] || audienceNameById.get(Number(vote.voter_telegram_id)) || "Зритель") : [],
+      points: resultPoints.get(a.id),
       voted: ownVoteTargets.includes(a.id),
       wager: a.wager || 0,
     })),
