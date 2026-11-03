@@ -35,14 +35,13 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   let room = rooms[0];
   if (!room) return json({ error: "Комната не найдена" }, 404);
   let players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&telegram_user_id=gt.0&select=telegram_user_id,display_name,score&order=joined_at.asc`);
-  const isPlayer = players.some(player => Number(player.telegram_user_id) === user.id);
-  if (!isPlayer && !(url.pathname === "/api/game/state" && request.method === "GET") && url.pathname !== "/api/game/spectator-vote") return json({ error: "Вы не в этой комнате" }, 403);
+  if (!players.some(player => Number(player.telegram_user_id) === user.id)) return json({ error: "Вы не в этой комнате" }, 403);
   const advanced = await advanceExpiredPhase(env, room, players);
   room = advanced.room;
   players = advanced.players;
 
   if (url.pathname === "/api/game/state" && request.method === "GET") {
-    return json(await getState(env, room, players, user.id, !isPlayer));
+    return json(await getState(env, room, players, user.id));
   }
 
   if (url.pathname === "/api/game/settings" && request.method === "POST") {
@@ -146,25 +145,6 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     return json({ ok: true, status: settled.room.status });
   }
 
-  if (url.pathname === "/api/game/spectator-vote" && request.method === "POST") {
-    if (isPlayer) return json({ error: "Игроки голосуют в основном голосовании" }, 403);
-    if (room.status !== "voting") return json({ error: "Голосование зрителей закрыто" }, 409);
-    const answerId = String(body.answerId || "");
-    const assignments = await getAssignments(env, room);
-    const units = votingUnits(assignments, room.round_number);
-    const active = units[Number(room.voting_prompt_index || 0)];
-    const answers = await loadAnswers(env, room);
-    const pairOf = pairKeyFor(assignments);
-    const target = answers.find(answer => answer.id === answerId);
-    if (!active || !target || pairOf(target) !== active.key) return json({ error: "Ответ не относится к текущему вопросу" }, 400);
-    const result = await env.GAME_ROOMS.getByName(code).castAudienceVote({
-      round: room.round_number, promptIndex: Number(room.voting_prompt_index || 0),
-      userId: user.id, answerId,
-    });
-    if (!result.ok) return json({ error: result.error || "Голос уже учтён" }, 409);
-    return json({ ok: true, counts: result.counts, votedAnswerId: answerId });
-  }
-
   if (url.pathname === "/api/game/chat" && request.method === "POST") {
     if (room.status !== "voting") return json({ error: "Чат зала открыт только на голосовании" }, 409);
     const text = String(body.text || "").replace(/\s+/g, " ").trim();
@@ -200,7 +180,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   return json({ error: "Не найдено" }, 404);
 }
 
-async function getState(env: Env, room: Room, players: Player[], userId: number, spectator = false): Promise<Record<string, unknown>> {
+async function getState(env: Env, room: Room, players: Player[], userId: number): Promise<Record<string, unknown>> {
   if (room.status === "round_results") players = await ensureAwarded(env, room, players);
   const assignments = room.round_number > 0 ? await getAssignments(env, room) : [];
   const units = votingUnits(assignments, room.round_number);
@@ -217,7 +197,6 @@ async function getState(env: Env, room: Room, players: Player[], userId: number,
   const activeAnswers = active ? submitted.filter(answer => pairOf(answer) === active.key) : [];
   const activeVotes = votes.filter(vote => activeAnswers.some(answer => answer.id === vote.answer_id));
   const ownVoteTargets = votes.filter(v => Number(v.voter_telegram_id) === userId).map(v => v.answer_id);
-  const audienceVoteState = active ? await env.GAME_ROOMS.getByName(room.code).getAudienceVotes(room.round_number, Number(room.voting_prompt_index || 0), userId) : { counts: {}, votedAnswerId: null };
   const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
   const scope = chatScope(room);
   let chat: Array<{ id: number; name: string; text: string; mine: boolean; at: number }> = [];
@@ -230,9 +209,6 @@ async function getState(env: Env, room: Room, players: Player[], userId: number,
     : ownAssignments.filter(a => !myAnswers.some(x => x.prompt_assignment_id === a.id)).slice(0, 1);
   return {
     code: room.code,
-    isSpectator: spectator,
-    audienceVoteCounts: audienceVoteState.counts,
-    audienceVotedAnswerId: audienceVoteState.votedAnswerId,
     status: room.status,
     round: room.round_number,
     deadline: room.phase_deadline_at || null,
@@ -258,7 +234,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number,
     promptLabels: Object.fromEntries(prompts.map(p => [p.id, p.prompt_text])),
     activeVotingPromptId: active?.promptId || null,
     activePairKey: active?.key || null,
-    isPromptAuthor: !spectator && room.round_number !== 3 && Boolean(active) && assignments.some(a => Number(a.player_telegram_id) === userId && (a.pair_key || a.prompt_id) === active?.key),
+    isPromptAuthor: room.round_number !== 3 && Boolean(active) && assignments.some(a => Number(a.player_telegram_id) === userId && (a.pair_key || a.prompt_id) === active?.key),
     answers: submitted.map(a => ({
       id: a.id,
       promptId: a.prompt_id,
