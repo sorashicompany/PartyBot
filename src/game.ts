@@ -376,8 +376,11 @@ async function presentVoting(env: Env, room: Room, players: Player[], startIndex
   if (!won) return (await freshRoom(env, room.code)) || { ...room, status: "voting", voting_prompt_index: index, phase_deadline_at: deadline };
   const next = { ...room, status: "voting", voting_prompt_index: index, phase_deadline_at: deadline };
   await narrateVotingCard(env, next, assignments, answers, units, index);
-  await notify(env, room.code, "voting_started", { round: room.round_number, index });
-  await playBotVotes(env, next, players, assignments, answers, units, index);
+  // Bot votes and room fan-out are independent once the voting card is live.
+  await Promise.all([
+    notify(env, room.code, "voting_started", { round: room.round_number, index }),
+    playBotVotes(env, next, players, assignments, answers, units, index),
+  ]);
   return next;
 }
 
@@ -772,9 +775,11 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   }
   if (rows.length) await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
   const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. Каждый игрок задал два вопроса; на каждый отвечают два игрока, кроме автора.`;
-  await announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true);
-  await notify(env, room.code, "next_round", { round });
-  await playBotAnswers(env, room, players);
+  await Promise.all([
+    announce(env, room.code, `<b>${label}</b>\\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true),
+    notify(env, room.code, "next_round", { round }),
+    playBotAnswers(env, room, players),
+  ]);
 }
 
 async function beginRound(env: Env, room: Room, players: Player[], round: number): Promise<void> {
@@ -817,9 +822,11 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
   }
   await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
   const label = round === 3 ? "Финал. Один вопрос на всех, можно ставить очки." : `Раунд ${round} из 3. У каждого два вопроса.`;
-  await announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. В этот чат они прилетят, когда откроется голосование — без имён, чтобы не подглядывать.`, true);
-  await notify(env, room.code, round === 1 && fromStatus !== "round_results" ? "game_started" : "next_round", { round });
-  await playBotAnswers(env, { ...room, round_number: round }, players);
+  await Promise.all([
+    announce(env, room.code, `<b>${label}</b>\\nОтветы пишутся в приложении. В этот чат они прилетят, когда откроется голосование — без имён, чтобы не подглядывать.`, true),
+    notify(env, room.code, round === 1 && fromStatus !== "round_results" ? "game_started" : "next_round", { round }),
+    playBotAnswers(env, { ...room, round_number: round }, players),
+  ]);
 }
 
 async function ensurePromptPool(env: Env, room: Room, needed: number): Promise<Prompt[]> {
