@@ -833,3 +833,51 @@
     transition: none;
   }
 }
+
+
+/* Telegram Mini App viewport and safe-area handling */
+:root {
+  --tg-viewport-height: 100dvh;
+  --tg-safe-top: env(safe-area-inset-top, 0px);
+  --tg-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --tg-content-safe-top: 0px;
+  --tg-content-safe-bottom: 0px;
+  color-scheme: dark;
+}
+html, body {
+  min-height: var(--tg-viewport-height);
+  overscroll-behavior-y: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+#root, .stage { min-height: var(--tg-viewport-height); }
+.stage {
+  padding-top: max(var(--tg-safe-top), var(--tg-content-safe-top));
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-bottom), var(--tg-content-safe-bottom));
+  box-sizing: border-box;
+}
+.frame {
+  padding-top: max(1rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(2.5rem, env(safe-area-inset-bottom, 0px));
+}
+button, input, textarea { touch-action: manipulation; }
+.field, .area { font-size: max(16px, 1.125rem); }
+@media (max-width: 600px) {
+  .frame {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+  .topbar { align-items: center; }
+  .display { font-size: clamp(2.35rem, 12vw, 3.7rem); }
+  .lead, .sub { font-size: 0.94rem; }
+  .btn, .field, .area, .stepper button, .icon-btn { min-height: 44px; }
+  .sheet { padding-bottom: 1rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
