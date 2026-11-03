@@ -350,9 +350,9 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
     customPromptRequired: room.status === "custom_writing" ? (room.round_number === 3 ? 1 : players.length) : 0,
     customPromptWriterName: room.status === "custom_writing" && room.round_number === 3
       ? ([...players].sort((a, b) => b.score - a.score)[0]?.display_name || "") : "",
-    isCustomPromptWriter: room.status === "custom_writing" && (room.round_number === 3
+    isCustomPromptWriter: isPlayer && room.status === "custom_writing" && (room.round_number === 3
       ? Number([...players].sort((a, b) => b.score - a.score)[0]?.telegram_user_id) === userId : true),
-    isFinalQuestionAuthor: room.round_number === 3 && assignments.length > 0 && !ownAssignments.length,
+    isFinalQuestionAuthor: isPlayer && room.round_number === 3 && assignments.length > 0 && !ownAssignments.length,
     votingPromptIndex: room.voting_prompt_index || 0,
     votingPromptTotal: units.length,
     customPromptsEnabled: Boolean(room.custom_prompts_enabled),
