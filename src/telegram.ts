@@ -1,4 +1,5 @@
 import { supabaseRequest } from "./supabase";
+import { settleRoomVoting } from "./game";
 import type { Env, TelegramUpdate } from "./types";
 
 export function escapeHtml(value: string): string {
@@ -233,15 +234,12 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
     const playerRows = await supabaseRequest<Array<{ telegram_user_id: number }>>(
       env, `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${query.from.id}&select=telegram_user_id&limit=1`,
     );
-    if (playerRows.length) {
-      await fail("Игроки голосуют в приложении. Голосование в чате — для зрителей.");
-      return;
-    }
-    const assignments = await supabaseRequest<Array<{ id: string; prompt_id: string; pair_key?: string | null }>>(
-      env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${round}&select=id,prompt_id,pair_key&order=created_at.asc`,
+    const isPlayer = playerRows.length > 0;
+    const assignments = await supabaseRequest<Array<{ id: string; prompt_id: string; player_telegram_id: number; pair_key?: string | null }>>(
+      env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${round}&select=id,prompt_id,player_telegram_id,pair_key&order=created_at.asc`,
     );
-    const answers = await supabaseRequest<Array<{ id: string; prompt_assignment_id: string; prompt_id: string }>>(
-      env, `answers?room_id=eq.${room.id}&round_number=eq.${round}&select=id,prompt_assignment_id,prompt_id`,
+    const answers = await supabaseRequest<Array<{ id: string; prompt_assignment_id: string; prompt_id: string; author_telegram_id: number }>>(
+      env, `answers?room_id=eq.${room.id}&round_number=eq.${round}&select=id,prompt_assignment_id,prompt_id,author_telegram_id`,
     );
     const units: Array<{ key: string }> = [];
     for (const assignment of assignments) {
@@ -259,36 +257,84 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
       return;
     }
 
-    // Store the vote in the shared results table as well as the Durable Object
-    // counter. This keeps Telegram votes visible to scoring and result reports.
-    await supabaseRequest(env, "votes", {
-      method: "POST",
-      body: JSON.stringify({
-        answer_id: answerId,
-        prompt_id: target.prompt_id,
-        voter_telegram_id: query.from.id,
-      }),
-    });
-    const display = displayName(query.from.first_name, query.from.last_name);
-    const result = await env.GAME_ROOMS.getByName(code).castAudienceVote({
-      round, promptIndex, userId: query.from.id, answerId, userName: display,
-    });
-    if (!result.ok) {
-      await fail(result.error || "Вы уже голосовали за этот вопрос.");
-      return;
-    }
     const ids = answers.filter(answer => pairOf(answer) === active.key).map(answer => answer.id);
+    const roomStub = env.GAME_ROOMS.getByName(code);
+    if (isPlayer) {
+      // Players may vote from the Telegram group as well as from the Mini App.
+      if (Number(target.author_telegram_id) === query.from.id ||
+          (round !== 3 && assignments.some(item =>
+            Number(item.player_telegram_id) === query.from.id && (item.pair_key || item.prompt_id) === active.key))) {
+        await fail("Автор вопроса и авторы ответов не голосуют за этот вопрос.");
+        return;
+      }
+      const existingVotes = await supabaseRequest<Array<{ answer_id: string }>>(
+        env, `votes?answer_id=in.(${ids.join(",")})&voter_telegram_id=eq.${query.from.id}&select=answer_id`,
+      );
+      if (existingVotes.length) {
+        await fail("Ваш голос за этот вопрос уже учтён.");
+        return;
+      }
+      const claimed = await roomStub.claimPlayerVote({
+        round, promptIndex, userId: query.from.id, answerId,
+      });
+      if (!claimed) {
+        await fail("Ваш голос за этот вопрос уже учтён.");
+        return;
+      }
+      try {
+        await supabaseRequest(env, "votes", {
+          method: "POST",
+          body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: query.from.id }),
+        });
+      } catch (error) {
+        await roomStub.rollbackPlayerVote({ round, promptIndex, userId: query.from.id });
+        throw error;
+      }
+      await roomStub.broadcast("room_changed", { code, playerVoteSubmitted: true });
+      await settleRoomVoting(env, code);
+    } else {
+      // The Durable Object is the atomic audience vote gate. Claim there
+      // first so Telegram retries cannot create duplicate rows in Supabase.
+      const display = displayName(query.from.first_name, query.from.last_name);
+      const result = await roomStub.castAudienceVote({
+        round, promptIndex, userId: query.from.id, answerId, userName: display,
+      });
+      if (!result.ok) {
+        await fail(result.error || "Вы уже голосовали за этот вопрос.");
+        return;
+      }
+      try {
+        await supabaseRequest(env, "votes", {
+          method: "POST",
+          body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: query.from.id }),
+        });
+      } catch (error) {
+        await roomStub.rollbackAudienceVote({ round, promptIndex, userId: query.from.id });
+        throw error;
+      }
+    }
+    const savedVotes = await supabaseRequest<Array<{ answer_id: string }>>(
+      env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id`,
+    );
+    const counts = Object.fromEntries(ids.map(id => [id, savedVotes.filter(vote => vote.answer_id === id).length]));
     const letters = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К"];
     const inline_keyboard = ids.slice(0, 10).map((id, index) => [{
-      text: `${letters[index]}. ${result.counts[id] || 0} голосов`,
+      text: `${letters[index]}. ${counts[id] || 0} голосов`,
       callback_data: `aud|${code}|${round}|${promptIndex}|${id}`,
     }]);
-    const edited = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/editMessageReplyMarkup`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: message.chat.id, message_id: message.message_id, reply_markup: { inline_keyboard } }),
-    });
-    const editResult = await edited.json().catch(() => ({})) as { ok?: boolean; description?: string };
-    if (!edited.ok || !editResult.ok) throw new Error(editResult.description || `Telegram markup update failed: ${edited.status}`);
+    try {
+      const edited = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/editMessageReplyMarkup`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: message.chat.id, message_id: message.message_id, reply_markup: { inline_keyboard } }),
+      });
+      const editResult = await edited.json().catch(() => ({})) as { ok?: boolean; description?: string };
+      if (!edited.ok || !editResult.ok) throw new Error(editResult.description || `Telegram markup update failed: ${edited.status}`);
+    } catch (error) {
+      // The vote is already safely stored; a cosmetic keyboard refresh must
+      // not be reported as a failed vote.
+      console.error(JSON.stringify({ level: "warn", message: "audience keyboard refresh failed", detail: error instanceof Error ? error.message : "unknown" }));
+      await fail("Голос засчитан. Не удалось обновить счётчик на кнопках, но результат сохранён.");
+    }
   } catch (error) {
     console.error(JSON.stringify({ level: "error", message: "audience vote failed", detail: error instanceof Error ? error.message : "unknown" }));
     await fail("Не удалось сохранить голос. Попробуйте ещё раз или проголосуйте в приложении.");

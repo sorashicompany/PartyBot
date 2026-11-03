@@ -39,6 +39,11 @@ export class GameRoom extends DurableObject<Env> {
         created_at INTEGER NOT NULL,
         PRIMARY KEY (round, prompt_index, user_id)
       )`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS player_vote_claims (
+        round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, user_id INTEGER NOT NULL,
+        answer_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (round, prompt_index, user_id)
+      )`);
       this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS audience_vote_names (
         round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, user_id INTEGER NOT NULL,
         answer_id TEXT NOT NULL, user_name TEXT NOT NULL, created_at INTEGER NOT NULL,
@@ -55,6 +60,10 @@ export class GameRoom extends DurableObject<Env> {
       )`);
       this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS question_reveals (
         round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, revealed_at INTEGER NOT NULL,
+        PRIMARY KEY (round, prompt_index)
+      )`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS question_awards (
+        round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, awarded_at INTEGER NOT NULL,
         PRIMARY KEY (round, prompt_index)
       )`);
     });
@@ -144,6 +153,26 @@ export class GameRoom extends DurableObject<Env> {
     return { messages };
   }
 
+  async claimPlayerVote(input: { round: number; promptIndex: number; userId: number; answerId: string }): Promise<boolean> {
+    const existing = this.ctx.storage.sql.exec(
+      `SELECT answer_id FROM player_vote_claims WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    ).toArray();
+    if (existing.length) return false;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO player_vote_claims (round, prompt_index, user_id, answer_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+      input.round, input.promptIndex, input.userId, input.answerId, Date.now(),
+    );
+    return true;
+  }
+
+  async rollbackPlayerVote(input: { round: number; promptIndex: number; userId: number }): Promise<void> {
+    this.ctx.storage.sql.exec(
+      `DELETE FROM player_vote_claims WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    );
+  }
+
   async castAudienceVote(input: { round: number; promptIndex: number; userId: number; answerId: string; userName?: string }): Promise<{ ok: boolean; counts: Record<string, number>; error?: string }> {
     const existing = this.ctx.storage.sql.exec(
       `SELECT answer_id FROM audience_votes WHERE round = ? AND prompt_index = ? AND user_id = ?`,
@@ -162,6 +191,19 @@ export class GameRoom extends DurableObject<Env> {
     const counts = await this.getAudienceCounts(input.round, input.promptIndex);
     await this.broadcast("audience_vote", { round: input.round, promptIndex: input.promptIndex, counts });
     return { ok: true, counts };
+  }
+
+  async rollbackAudienceVote(input: { round: number; promptIndex: number; userId: number }): Promise<void> {
+    this.ctx.storage.sql.exec(
+      `DELETE FROM audience_votes WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    );
+    this.ctx.storage.sql.exec(
+      `DELETE FROM audience_vote_names WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    );
+    const counts = await this.getAudienceCounts(input.round, input.promptIndex);
+    await this.broadcast("audience_vote", { round: input.round, promptIndex: input.promptIndex, counts });
   }
 
   async getAudienceVotes(round: number, promptIndex: number, userId: number): Promise<{ counts: Record<string, number>; votedAnswerId: string | null }> {
@@ -214,6 +256,26 @@ export class GameRoom extends DurableObject<Env> {
       round, promptIndex, Date.now(),
     );
     return true;
+  }
+
+  async claimQuestionAward(round: number, promptIndex: number): Promise<boolean> {
+    const existing = this.ctx.storage.sql.exec(
+      `SELECT round FROM question_awards WHERE round = ? AND prompt_index = ?`,
+      round, promptIndex,
+    ).toArray();
+    if (existing.length) return false;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO question_awards (round, prompt_index, awarded_at) VALUES (?, ?, ?)`,
+      round, promptIndex, Date.now(),
+    );
+    return true;
+  }
+
+  async rollbackQuestionAward(round: number, promptIndex: number): Promise<void> {
+    this.ctx.storage.sql.exec(
+      `DELETE FROM question_awards WHERE round = ? AND prompt_index = ?`,
+      round, promptIndex,
+    );
   }
 
   async claimRoundAward(round: number): Promise<boolean> {

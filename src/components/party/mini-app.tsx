@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 
 type Player = { name: string; score: number; isHost: boolean; you?: boolean };
 type Prompt = { assignmentId: string; promptId: string; text: string; answered: boolean; slot: number };
-type Answer = { id: string; promptId: string; pairKey?: string; text: string; name?: string; own: boolean; votes: number; voted: boolean; wager: number };
+type Answer = { id: string; promptId: string; pairKey?: string; text: string; name?: string; own: boolean; votes: number; voters?: string[]; points?: number; voted: boolean; wager: number };
 type ChatLine = { id: number; name: string; text: string; mine: boolean; at: number };
 type RoomState = {
   code: string; status: string; round: number; deadline: string | null; customPromptCount: number; customPromptSubmitted: boolean; customPromptSubmittedSlots?: number[]; customPromptRequired: number; customPromptWriterName: string; isCustomPromptWriter: boolean; isFinalQuestionAuthor: boolean;
@@ -204,9 +204,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                 <p className="lead">{room.isHost ? "Как только вас трое — жми старт. Чат группы уже слышит, кто садится." : "Ведущий откроет шоу. Бот в чате напишет, когда начнётся."}</p>
                 {room.isHost ? (
                   <>
-                    <button className="btn btn-ghost" disabled={busy} onClick={() => void action("/api/game/settings", { customEnabled: !room.customPromptsEnabled })}>
-                      {room.customPromptsEnabled ? "Свои вопросы включены" : "Играть колодой бота"}
-                    </button>
+                    <p className="lead">В раундах 1 и 2 каждый игрок придумывает один вопрос. Затем каждый отвечает на два разных вопроса других игроков, и зал голосует за ответы.</p>
                     <button className="btn btn-yellow" disabled={busy || room.players.length < 3} onClick={() => void action("/api/game/start")}>Начать шоу</button>
                   </>
                 ) : null}
@@ -219,13 +217,13 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                 {room.round === 3 ? (
                   <p className="lead">Лидер по очкам — {room.customPromptWriterName}. Он придумывает финальный вопрос, но сам на него не отвечает.</p>
                 ) : (
-                  <p className="lead">Каждый игрок пишет два вопроса. Принято: {room.customPromptCount}/{room.customPromptRequired}.</p>
+                  <p className="lead">Каждый игрок пишет один вопрос. Принято: {room.customPromptCount}/{room.customPromptRequired}.</p>
                 )}
                 {room.customPromptSubmitted ? <p className="lead">Все вопросы отправлены. Ждём остальных.</p> : room.isCustomPromptWriter ? (
                   <>
-                    <label className="field-label" htmlFor="custom-question">{room.round === 3 ? "Финальный вопрос" : `Вопрос №${room.customPromptSubmittedSlots?.includes(1) ? 2 : 1} из 2`} <span>{custom.length}/240</span></label>
+                    <label className="field-label" htmlFor="custom-question">{room.round === 3 ? "Финальный вопрос" : "Твой вопрос"} <span>{custom.length}/240</span></label>
                     <textarea id="custom-question" className="area" maxLength={240} value={custom} onChange={e => setCustom(e.target.value)} />
-                    <button className="btn btn-yellow" disabled={busy || custom.trim().length < 5} onClick={() => void action("/api/game/custom-prompts", { prompt: custom, slot: room.round === 3 ? 1 : (room.customPromptSubmittedSlots?.includes(1) ? 2 : 1) })}>Отправить вопрос</button>
+                    <button className="btn btn-yellow" disabled={busy || custom.trim().length < 5} onClick={() => void action("/api/game/custom-prompts", { prompt: custom, slot: 1 })}>Отправить вопрос</button>
                   </>
                 ) : <p className="lead">В этом раунде вопрос придумывает лидер. Ждём его вопрос.</p>}
               </div>
@@ -234,7 +232,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
             {room.status === "answering" && !room.prompts[0] ? <div className="stack"><h1 className="display">{room.isFinalQuestionAuthor ? <>Твой<br /><em>финал.</em></> : <>Ответ<br /><em>улетел.</em></>}</h1><p className="lead">{room.isFinalQuestionAuthor ? "Ты придумал финальный вопрос. Сам отвечать не можешь — дождись ответов остальных и голосуй за лучший." : "Ждём остальные ответы. В чат панчи попадут только на голосовании."}</p></div> : null}
             {room.status === "answering" && room.prompts[0] ? (
               <div className="stack">
-                <h1 className="display">{room.prompts[0].slot === 2 ? "Второй" : "Первый"}<br /><em>панч.</em></h1>
+                <h1 className="display">{room.prompts[0].slot === 2 ? "Второй ответ" : "Ответ"}<br /><em>панч.</em></h1>
                 <div className="bubble"><p className="kicker">вопрос</p><h2 className="prompt">{room.prompts[0].text}</h2></div>
                 {room.prompts[0].answered ? <p className="lead">Принято. Можно выдохнуть.</p> : (
                   <>
@@ -281,6 +279,27 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               </div>
             ) : null}
 
+            {room.status === "question_results" ? (
+              <div className="stack question-reveal" aria-live="polite">
+                <h1 className="display">Кто<br /><em>забрал очки?</em></h1>
+                <div className="bubble">
+                  <p className="kicker">вопрос закрыт</p>
+                  <h2 className="prompt">{room.promptLabels[room.activeVotingPromptId || ""] || "Результаты голосования"}</h2>
+                </div>
+                {room.answers.filter(item => item.pairKey === room.activePairKey).map((item, index) => (
+                  <article className="result-answer" key={item.id} style={{ animationDelay: `${index * 90}ms` }}>
+                    <p className="kicker">Ответ {MARKS[index] || index + 1}</p>
+                    <p className="punch">{item.text}</p>
+                    <p><b>Автор:</b> {item.name || "Игрок"}</p>
+                    <p><b>Голоса:</b> {item.votes}</p>
+                    <p><b>Проголосовали:</b> {item.voters?.length ? item.voters.join(", ") : "никто"}</p>
+                    <p className="result-points">{(item.points || 0) > 0 ? "+" : ""}{(item.points || 0).toLocaleString("ru-RU")} очков</p>
+                  </article>
+                ))}
+                <p className="sub">Следующий вопрос откроется автоматически.</p>
+              </div>
+            ) : null}
+
             {room.status === "round_results" || room.status === "finished" ? (
               <div className="stack">
                 <h1 className="display">{room.status === "finished" ? "Занавес." : "Счёт."}</h1>
@@ -323,7 +342,7 @@ function PlayerStrip({ players }: { players: Player[] }) {
       {players.map((player, index) => (
         <div key={`${player.name}-${index}`} className={player.you ? "chip you" : "chip"}>
           <span className="who">{player.name}</span>
-          <span className="pts">{player.score.toLocaleString("ru-RU")}</span>
+          <span className="pts" key={player.score}>{player.score.toLocaleString("ru-RU")}</span>
           {player.isHost ? <span className="tag"> · ведущий</span> : null}
         </div>
       ))}
