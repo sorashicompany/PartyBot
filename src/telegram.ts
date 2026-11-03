@@ -38,6 +38,70 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
   if (!message?.text || !message.from || !["group", "supergroup"].includes(message.chat.type)) return;
   if (!/^\/party(?:@\w+)?(?:\s|$)/i.test(message.text.trim())) return;
 
+  const command = message.text.trim().replace(/^\/party(?:@\\w+)?\\s*/i, "").trim();
+  if (/^(?:bots(?:\\s+\\d+)?|clearbots)$/i.test(command)) {
+    const rooms = await supabaseRequest<Array<{ id: string; code: string; host_telegram_id: number; status: string }>>(
+      env,
+      `rooms?group_chat_id=eq.${message.chat.id}&status=eq.lobby&select=id,code,host_telegram_id,status&order=created_at.desc&limit=1`,
+    );
+    const room = rooms[0];
+    if (!room) {
+      await sendTelegramMessage(env, message.chat.id, "Нет открытого лобби. Сначала отправьте /party.");
+      return;
+    }
+    if (Number(room.host_telegram_id) !== message.from.id) {
+      await sendTelegramMessage(env, message.chat.id, "Управлять тестовыми игроками может только ведущий лобби.");
+      return;
+    }
+    if (/^clearbots$/i.test(command)) {
+      const removed = await supabaseRequest<Array<{ telegram_user_id: number }>>(
+        env,
+        `room_players?room_id=eq.${room.id}&telegram_user_id=lt.0&select=telegram_user_id`,
+      );
+      await fetch(new URL(`/rest/v1/room_players?room_id=eq.${room.id}&telegram_user_id=lt.0`, env.SUPABASE_URL), {
+        method: "DELETE",
+        headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
+      });
+      await sendTelegramMessage(env, message.chat.id, `Удалено тестовых игроков: ${removed.length}.`);
+    } else {
+      const requested = Number(command.match(/\\d+/)?.[0] || 1);
+      if (!Number.isInteger(requested) || requested < 1 || requested > 10) {
+        await sendTelegramMessage(env, message.chat.id, "Укажите количество от 1 до 10: /party bots 5");
+        return;
+      }
+      const current = await supabaseRequest<Array<{ telegram_user_id: number; display_name: string }>>(
+        env,
+        `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name`,
+      );
+      const available = Math.max(0, 10 - current.length);
+      const count = Math.min(requested, available);
+      if (!count) {
+        await sendTelegramMessage(env, message.chat.id, "Лобби уже заполнено (10/10).");
+        return;
+      }
+      const names = ["Тестовый игрок", "Бот Проверяка", "Панч-Машина", "Капитан Мем", "Случайный Гений", "Лорд Абсурда", "Шутник 3000", "Мисс Ирония", "Профессор Хаос", "Зритель №1"];
+      const now = Date.now();
+      const rows = Array.from({ length: count }, (_, index) => ({
+        room_id: room.id,
+        telegram_user_id: -(now * 100 + index + 1),
+        display_name: names[index % names.length],
+        score: 0,
+      }));
+      const response = await fetch(new URL("/rest/v1/room_players", env.SUPABASE_URL), {
+        method: "POST",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(rows),
+      });
+      if (!response.ok) throw new Error(`Test player insert failed: ${response.status} ${(await response.text()).slice(0, 200)}`);
+      await sendTelegramMessage(env, message.chat.id, `Добавлено тестовых игроков: ${count}. В лобби ${current.length + count}/10. Удалить их можно командой /party clearbots.`);
+    }
+    return;
+  }
+
   const cooldownSince = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const cooldownUrl = "/rest/v1/rooms?group_chat_id=eq." + message.chat.id + "&created_at=gte." + encodeURIComponent(cooldownSince) + "&select=id&limit=1";
   const recentRooms = await fetch(new URL(cooldownUrl, env.SUPABASE_URL), {
