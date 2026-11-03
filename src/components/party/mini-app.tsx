@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 type TelegramApp = {
   initData?: string;
@@ -56,7 +56,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
 
   useEffect(() => { void loadState(); }, [loadState, refresh]);
 
-  const join = async (event?: React.FormEvent) => {
+  const join = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!/^[A-HJ-NP-Z2-9]{5}$/i.test(code.trim())) { setError("Введи пятизначный код комнаты"); return; }
     setBusy(true); setError("");
@@ -162,7 +162,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               <div className="stack">
                 <p className="kicker">Голосование · {room.votingPromptIndex + 1}</p>
                 <h2 className="prompt">{room.promptLabels[room.activeVotingPromptId || ""] || "Выбери лучший ответ"}</h2>
-                {activeAnswers.map(a => <button key={a.id} className="vcard" disabled={busy || a.own || a.voted || room.votesCast > 0} onClick={() => void action("/api/game/vote",{answerId:a.id})}><p className="punch">{a.text}</p><span className="stamp">{a.own ? "твой ответ" : a.voted ? "голос учтён" : "выбрать"}</span></button>)}
+                {activeAnswers.map(a => <button key={a.id} className="vcard" disabled={busy || a.own || a.voted || activeAnswers.some(item => item.voted)} onClick={() => void action("/api/game/vote",{answerId:a.id})}><p className="punch">{a.text}</p><span className="stamp">{a.own ? "твой ответ" : a.voted ? "голос учтён" : "выбрать"}</span></button>)}
                 <p className="sub">{room.votesCast ? "Голос принят. Ждём остальных." : "Авторы этой пары не голосуют."}</p>
               </div>
             ) : null}
