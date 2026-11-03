@@ -67,7 +67,8 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       const deadline = new Date(Date.now() + CUSTOM_MS).toISOString();
       const won = await casRoom(env, room.id, { status: "lobby" }, { status: "custom_writing", phase_deadline_at: deadline, round_number: 1 });
       if (won) {
-        await announce(env, code, "<b>Своя колода.</b>\nКаждый игрок придумывает один вопрос. На это две минуты. Автор вопроса сам на него не отвечает.", true);
+        await playBotQuestions(env, { ...room, status: "custom_writing", round_number: 1 }, players);
+        await announce(env, code, "<b>Своя колода.</b>\\nКаждый игрок придумывает один вопрос. На это две минуты. Автор вопроса сам на него не отвечает.", true);
       }
       return json({ ok: true, status: "custom_writing", round: 1 });
     }
@@ -190,6 +191,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
         status: "custom_writing", round_number: nextRound, voting_prompt_index: 0, phase_deadline_at: deadline,
       });
       if (won) {
+        await playBotQuestions(env, { ...room, status: "custom_writing", round_number: nextRound }, players);
         if (nextRound === 3) {
           const leader = [...players].sort((a, b) => b.score - a.score)[0];
           await announce(env, code, `<b>Финальный вопрос.</b> Лидер по очкам — <b>${escapeHtml(leader?.display_name || "Игрок")}</b>. Только он придумывает вопрос. Сам он на него не отвечает. Две минуты.`, true);
@@ -551,6 +553,34 @@ async function playBotVotes(
     });
   }
   await notify(env, room.code, "room_changed", { code: room.code, botVotes: eligibleBots.length });
+}
+
+function botQuestion(bot: Player, round: number): string {
+  const subjects = ["на вечеринке", "в семейном чате", "на первом свидании", "в офисе в понедельник", "во время важного собеседования", "в отпуске с друзьями", "на свадьбе", "в очереди за кофе"];
+  const twists = ["Что самое нелепое может пойти не так", "Какой самый странный поступок можно совершить", "Как объяснить окружающим, почему внезапно", "Что гарантированно превратит обычный день в легенду", "Какой секрет лучше никогда не раскрывать", "Как выкрутиться, если внезапно выяснилось"];
+  const seed = Math.abs(Number(bot.telegram_user_id)) + round * 31;
+  return `${twists[seed % twists.length]} ${subjects[Math.floor(seed / 7) % subjects.length]}?`;
+}
+
+async function playBotQuestions(env: Env, room: Room, players: Player[]): Promise<void> {
+  const round = room.round_number;
+  const leader = [...players].sort((a, b) => b.score - a.score)[0];
+  const writers = round === 3 ? (leader && Number(leader.telegram_user_id) < 0 ? [leader] : []) : players.filter(player => Number(player.telegram_user_id) < 0);
+  if (!writers.length) return;
+  const doRoom = env.GAME_ROOMS.getByName(room.code);
+  const existing = await doRoom.getRoundQuestions(round);
+  const submitted = new Set(existing.map(item => Number(item.userId)));
+  for (const bot of writers) {
+    if (submitted.has(Number(bot.telegram_user_id))) continue;
+    const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
+      method: "POST",
+      body: JSON.stringify({ prompt_text: botQuestion(bot, round), locale: "ru", enabled: false }),
+    });
+    if (!inserted[0]?.id) continue;
+    await doRoom.saveRoundQuestion({ round, userId: Number(bot.telegram_user_id), promptId: inserted[0].id });
+    submitted.add(Number(bot.telegram_user_id));
+  }
+  await notify(env, room.code, "room_changed", { code: room.code, botQuestions: writers.length });
 }
 
 async function beginCustomRound(env: Env, room: Room, players: Player[]): Promise<void> {
