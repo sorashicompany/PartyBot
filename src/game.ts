@@ -97,7 +97,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     const target = answers.find(answer => answer.id === answerId);
     if (!target || Number(target.author_telegram_id) === user.id) return json({ error: "You cannot vote for your own answer" }, 400);
     const matchupAnswers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&prompt_id=eq.${target.prompt_id}&select=author_telegram_id`);
-    if (matchupAnswers.some(a => Number(a.author_telegram_id) === user.id)) return json({ error: "Writers cannot vote in their own matchup" }, 400);
+    if (room.round_number !== 3 && matchupAnswers.some(a => Number(a.author_telegram_id) === user.id)) return json({ error: "Writers cannot vote in their own matchup" }, 400);
     const ownVotes = await supabaseRequest<Vote[]>(env, `votes?prompt_id=eq.${target.prompt_id}&voter_telegram_id=eq.${user.id}&select=answer_id`);
     if (ownVotes.length) return json({ error: "Already voted for this answer" }, 409);
     await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
@@ -147,6 +147,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
     prompts: (room.round_number === 3 ? ownAssignments : ownAssignments.filter(a => !myAnswers.some(x => x.prompt_assignment_id === a.id)).sort((a,b) => (a.prompt_slot || 1) - (b.prompt_slot || 1)).slice(0,1)).map(a => ({ assignmentId: a.id, promptId: a.prompt_id, text: prompts.find(p => p.id === a.prompt_id)?.prompt_text || "", answered: myAnswers.some(x => x.prompt_assignment_id === a.id), slot: a.prompt_slot || 1 })),
     promptLabels: Object.fromEntries(prompts.map(p => [p.id, p.prompt_text])),
     activeVotingPromptId: [...new Set(assignments.map(a => a.prompt_id))][Number(room.voting_prompt_index || 0)] || null,
+    isPromptAuthor: assignments.some(a => Number(a.player_telegram_id) === userId && a.prompt_id === ([...new Set(assignments.map(x => x.prompt_id))][Number(room.voting_prompt_index || 0)] || "")),
     answers: submitted.map(a => ({ id: a.id, promptId: a.prompt_id, text: a.answer_text, name: room.status === "round_results" || room.status === "finished" ? names[String(a.author_telegram_id)] : undefined, own: Number(a.author_telegram_id) === userId, votes: voteCounts[a.id] || 0, voted: ownVoteTargets.includes(a.id), wager: a.wager || 0 })),
     votesCast: ownVoteTargets.length, votesNeeded: room.round_number === 3 ? 1 : 2,
     isHost: Number(room.host_telegram_id) === userId
