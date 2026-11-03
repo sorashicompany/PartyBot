@@ -342,7 +342,7 @@ function PlayerStrip({ players }: { players: Player[] }) {
       {players.map((player, index) => (
         <div key={`${player.name}-${index}`} className={player.you ? "chip you" : "chip"}>
           <span className="who">{player.name}</span>
-          <span className="pts">{player.score.toLocaleString("ru-RU")}</span>
+          <span className="pts" key={player.score}>{player.score.toLocaleString("ru-RU")}</span>
           {player.isHost ? <span className="tag"> · ведущий</span> : null}
         </div>
       ))}
