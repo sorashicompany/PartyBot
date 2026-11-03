@@ -1,4 +1,4 @@
-import { announce, scoreboardText, votingCardText } from "./announce";
+import { announce, escapeHtml, scoreboardText, votingCardText } from "./announce";
 import { supabaseRequest } from "./supabase";
 import type { Env } from "./types";
 
