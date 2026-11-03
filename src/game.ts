@@ -437,6 +437,9 @@ async function settleVoting(env: Env, room: Room, players: Player[], force: bool
     const voters = new Set(votes.map(vote => Number(vote.voter_telegram_id)));
     if (voters.size < expectedVoters(room.round_number, players, assignments, active.key)) return { room, players };
   }
+  if (room.round_number < 3) {
+    players = await awardQuestionPoints(env, room, players, active, unitAnswers, index);
+  }
   await announceQuestionResults(env, room, players, active, unitAnswers, index);
   // Pause on a dedicated reveal screen so every player sees authors, voters
   // and the per-answer award before the next voting card appears.
@@ -539,8 +542,55 @@ async function enterResults(env: Env, room: Room, players: Player[]): Promise<Ro
   return { ...room, status: "round_results", phase_deadline_at: null };
 }
 
+async function awardQuestionPoints(
+  env: Env,
+  room: Room,
+  players: Player[],
+  unit: Unit,
+  answers: Answer[],
+  promptIndex: number,
+): Promise<Player[]> {
+  if (!answers.length) return players;
+  const doRoom = env.GAME_ROOMS.getByName(room.code);
+  const claimed = await doRoom.claimQuestionAward(room.round_number, promptIndex);
+  if (!claimed) return reloadPlayers(env, room.id);
+  const ids = answers.map(answer => answer.id);
+  const assignments = await getAssignments(env, room);
+  const playerIds = new Set(players.map(player => Number(player.telegram_user_id)));
+  const [votes, audienceCounts] = await Promise.all([
+    supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id,voter_telegram_id`),
+    doRoom.getAudienceCounts(room.round_number, promptIndex),
+  ]);
+  const playerVotes = votes.filter(vote => playerIds.has(Number(vote.voter_telegram_id)));
+  const totalPlayerVotes = playerVotes.length;
+  const eligible = expectedVoters(room.round_number, players, assignments, unit.key);
+  const audienceHigh = Math.max(0, ...Object.values(audienceCounts));
+  const audienceWinners = answers.filter(answer => audienceHigh > 0 && (audienceCounts[answer.id] || 0) === audienceHigh);
+  const audienceShare = audienceWinners.length ? Math.floor(500 / audienceWinners.length) : 0;
+  try {
+    for (const answer of answers) {
+      const playerCount = playerVotes.filter(vote => vote.answer_id === answer.id).length;
+      const sweep = playerCount > 0 && playerCount === totalPlayerVotes && playerCount >= eligible ? 1000 : 0;
+      const audienceBonus = audienceWinners.some(item => item.id === answer.id) ? audienceShare : 0;
+      const raw = playerCount * 1000 + sweep + audienceBonus;
+      const author = players.find(player => Number(player.telegram_user_id) === Number(answer.author_telegram_id));
+      if (!author || !raw) continue;
+      await supabaseRequest(env, `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${author.telegram_user_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ score: Math.max(0, author.score + raw) }),
+      });
+    }
+  } catch (error) {
+    // Keep the award claim to prevent duplicate points if a prior PATCH landed.
+    throw error;
+  }
+  return reloadPlayers(env, room.id);
+}
+
 async function ensureAwarded(env: Env, room: Room, players: Player[]): Promise<Player[]> {
-  if (room.round_number < 1) return players;
+  // Rounds 1 and 2 award points after each question; only the final round
+  // still settles its pool at the round boundary.
+  if (room.round_number < 3) return reloadPlayers(env, room.id);
   const claimed = await env.GAME_ROOMS.getByName(room.code).claimRoundAward(room.round_number);
   if (!claimed) return reloadPlayers(env, room.id);
   await awardRoundPoints(env, room, players);
