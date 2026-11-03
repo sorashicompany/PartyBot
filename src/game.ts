@@ -474,10 +474,11 @@ const BOT_ANSWER_TEMPLATES = [
 
 function botAnswer(prompt: string, botId: number, round: number): string {
   const normalized = prompt.replace(/\s+/g, " ").trim().replace(/[?!.]+$/, "").toLocaleLowerCase("ru-RU");
-  const hash = Math.abs(botId * 31 + round * 17 + normalized.length * 13);
+  const hash = Math.abs([...normalized].reduce((sum, char) => sum * 31 + char.charCodeAt(0), botId * 17 + round));
   const punchline = BOT_ANSWER_TEMPLATES[hash % BOT_ANSWER_TEMPLATES.length];
   const lead = ["мой официальный план:", "короткий ответ:", "по версии экспертов:", "я провёл исследование и выяснил:"][hash % 4];
-  return `${lead} ${punchline}`.slice(0, 240);
+  const context = normalized.length > 48 ? `${normalized.slice(0, 45)}…` : normalized;
+  return `${lead} если речь про «${context}»: ${punchline}`.slice(0, 240);
 }
 
 async function playBotAnswers(env: Env, room: Room, players: Player[]): Promise<void> {
