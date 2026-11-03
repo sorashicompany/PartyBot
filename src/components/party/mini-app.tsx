@@ -204,7 +204,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                 <p className="lead">{room.isHost ? "Как только вас трое — жми старт. Чат группы уже слышит, кто садится." : "Ведущий откроет шоу. Бот в чате напишет, когда начнётся."}</p>
                 {room.isHost ? (
                   <>
-                    <p className="lead">В раундах 1 и 2 каждый игрок придумывает по два вопроса. Затем другие игроки отвечают, и зал голосует за ответы.</p>
+                    <p className="lead">В раундах 1 и 2 каждый игрок придумывает один вопрос. Затем каждый отвечает на два разных вопроса других игроков, и зал голосует за ответы.</p>
                     <button className="btn btn-yellow" disabled={busy || room.players.length < 3} onClick={() => void action("/api/game/start")}>Начать шоу</button>
                   </>
                 ) : null}
@@ -217,13 +217,13 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                 {room.round === 3 ? (
                   <p className="lead">Лидер по очкам — {room.customPromptWriterName}. Он придумывает финальный вопрос, но сам на него не отвечает.</p>
                 ) : (
-                  <p className="lead">Каждый игрок пишет два вопроса. Принято: {room.customPromptCount}/{room.customPromptRequired}.</p>
+                  <p className="lead">Каждый игрок пишет один вопрос. Принято: {room.customPromptCount}/{room.customPromptRequired}.</p>
                 )}
                 {room.customPromptSubmitted ? <p className="lead">Все вопросы отправлены. Ждём остальных.</p> : room.isCustomPromptWriter ? (
                   <>
-                    <label className="field-label" htmlFor="custom-question">{room.round === 3 ? "Финальный вопрос" : `Вопрос №${room.customPromptSubmittedSlots?.includes(1) ? 2 : 1} из 2`} <span>{custom.length}/240</span></label>
+                    <label className="field-label" htmlFor="custom-question">{room.round === 3 ? "Финальный вопрос" : "Твой вопрос"} <span>{custom.length}/240</span></label>
                     <textarea id="custom-question" className="area" maxLength={240} value={custom} onChange={e => setCustom(e.target.value)} />
-                    <button className="btn btn-yellow" disabled={busy || custom.trim().length < 5} onClick={() => void action("/api/game/custom-prompts", { prompt: custom, slot: room.round === 3 ? 1 : (room.customPromptSubmittedSlots?.includes(1) ? 2 : 1) })}>Отправить вопрос</button>
+                    <button className="btn btn-yellow" disabled={busy || custom.trim().length < 5} onClick={() => void action("/api/game/custom-prompts", { prompt: custom, slot: 1 })}>Отправить вопрос</button>
                   </>
                 ) : <p className="lead">В этом раунде вопрос придумывает лидер. Ждём его вопрос.</p>}
               </div>
@@ -232,7 +232,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
             {room.status === "answering" && !room.prompts[0] ? <div className="stack"><h1 className="display">{room.isFinalQuestionAuthor ? <>Твой<br /><em>финал.</em></> : <>Ответ<br /><em>улетел.</em></>}</h1><p className="lead">{room.isFinalQuestionAuthor ? "Ты придумал финальный вопрос. Сам отвечать не можешь — дождись ответов остальных и голосуй за лучший." : "Ждём остальные ответы. В чат панчи попадут только на голосовании."}</p></div> : null}
             {room.status === "answering" && room.prompts[0] ? (
               <div className="stack">
-                <h1 className="display">{room.prompts[0].slot === 2 ? "Второй" : "Первый"}<br /><em>панч.</em></h1>
+                <h1 className="display">{room.prompts[0].slot === 2 ? "Второй ответ" : "Ответ"}<br /><em>панч.</em></h1>
                 <div className="bubble"><p className="kicker">вопрос</p><h2 className="prompt">{room.prompts[0].text}</h2></div>
                 {room.prompts[0].answered ? <p className="lead">Принято. Можно выдохнуть.</p> : (
                   <>
