@@ -225,7 +225,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
     promptIds.length
       ? supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`)
       : Promise.resolve([] as Prompt[]),
-    ["voting", "round_results", "finished"].includes(room.status)
+    ["voting", "question_results", "round_results", "finished"].includes(room.status)
       ? loadAnswers(env, room)
       : Promise.resolve([] as Answer[]),
     ownAssignments.length
@@ -237,7 +237,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
     : [];
   const pairOf = pairKeyFor(assignments);
   const names = Object.fromEntries(players.map(p => [String(p.telegram_user_id), p.display_name]));
-  const revealNames = room.status === "round_results" || room.status === "finished";
+  const revealNames = room.status === "question_results" || room.status === "round_results" || room.status === "finished";
   const activeAnswers = active ? submitted.filter(answer => pairOf(answer) === active.key) : [];
   const activeVotes = votes.filter(vote => activeAnswers.some(answer => answer.id === vote.answer_id));
   const playerIdsForState = new Set(players.map(player => Number(player.telegram_user_id)));
@@ -323,6 +323,10 @@ async function advanceExpiredPhase(env: Env, room: Room, players: Player[]): Pro
     const next = await presentVoting(env, room, players, 0);
     return { room: next, players };
   }
+  if (room.status === "question_results") {
+    const next = await presentVoting(env, room, players, Number(room.voting_prompt_index || 0) + 1);
+    return { room: next, players: next.status === "round_results" ? await reloadPlayers(env, room.id) : players };
+  }
   if (room.status === "voting") {
     const next = await settleVoting(env, room, players, true);
     return next;
@@ -370,8 +374,20 @@ async function settleVoting(env: Env, room: Room, players: Player[], force: bool
     if (voters.size < expectedVoters(room.round_number, players, assignments, active.key)) return { room, players };
   }
   await announceQuestionResults(env, room, players, active, unitAnswers, index);
-  const moved = await presentVoting(env, { ...room, status: "voting" }, players, index + 1);
-  return { room: moved, players: moved.status === "round_results" ? await reloadPlayers(env, room.id) : players };
+  // Pause on a dedicated reveal screen so every player sees authors, voters
+  // and the per-answer award before the next voting card appears.
+  const deadline = new Date(Date.now() + 8000).toISOString();
+  const won = await casRoom(env, room.id, {
+    status: "voting",
+    voting_prompt_index: index,
+  }, {
+    status: "question_results",
+    phase_deadline_at: deadline,
+  });
+  const moved = won
+    ? { ...room, status: "question_results", voting_prompt_index: index, phase_deadline_at: deadline }
+    : (await freshRoom(env, room.code)) || room;
+  return { room: moved, players };
 }
 
 async function announceQuestionResults(
