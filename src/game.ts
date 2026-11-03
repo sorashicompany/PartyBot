@@ -63,7 +63,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (Number(room.host_telegram_id) !== user.id) return json({ error: "Только ведущий запускает шоу" }, 403);
     if (room.status !== "lobby") return json({ error: "Шоу уже началось" }, 409);
     if (players.length < 3 || players.length > 10) return json({ error: "Нужно от 3 до 10 игроков" }, 409);
-    // Rounds 1 and 2 always use two questions written by every player.
+    // Rounds 1 and 2 collect one question from every player; each player answers two others.
     await supabaseRequest(env, `rooms?id=eq.${room.id}`, {
       method: "PATCH",
       body: JSON.stringify({ custom_prompts_enabled: true }),
@@ -72,7 +72,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     const won = await casRoom(env, room.id, { status: "lobby" }, { status: "custom_writing", phase_deadline_at: deadline, round_number: 1 });
     if (won) {
       await playBotQuestions(env, { ...room, status: "custom_writing", round_number: 1, custom_prompts_enabled: true }, players);
-      await announce(env, code, "<b>Раунд 1 · вопросы игроков.</b>\nКаждый игрок придумывает два вопроса. На это две минуты. Автор не отвечает на собственные вопросы.", true);
+      await announce(env, code, "<b>Раунд 1 · вопросы игроков.</b>\nКаждый игрок придумывает один вопрос. Затем каждый ответит на два вопроса других игроков.", true);
     }
     return json({ ok: true, status: "custom_writing", round: 1 });
   }
@@ -80,8 +80,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   if (url.pathname === "/api/game/custom-prompts" && request.method === "POST") {
     if (room.status !== "custom_writing") return json({ error: "Сейчас вопросы не принимаются" }, 409);
     const question = String(body.prompt || "").replace(/\s+/g, " ").trim();
-    const promptSlot = room.round_number === 3 ? 1 : Number(body.slot);
-    if (![1, 2].includes(promptSlot)) return json({ error: "Укажите номер вопроса: 1 или 2" }, 400);
+    const promptSlot = 1;
     if (question.length < 5 || question.length > 240) return json({ error: "Вопрос должен быть от 5 до 240 символов" }, 400);
     const writer = room.round_number === 3
       ? [...players].sort((a, b) => b.score - a.score)[0]
@@ -100,13 +99,13 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     await doRoom.saveRoundQuestion({ round: room.round_number, userId: user.id, promptId: inserted[0].id, promptSlot });
     await notify(env, code, "room_changed", { code, customQuestionSubmitted: true });
     const questions = await doRoom.getRoundQuestions(room.round_number);
-    const required = room.round_number === 3 ? 1 : players.length * 2;
+    const required = players.length;
     const done = room.round_number === 3
       ? questions.some(item => Number(item.userId) === user.id)
-      : [1, 2].every(slot => questions.some(item => Number(item.userId) === user.id && item.promptSlot === slot));
+      : questions.some(item => Number(item.userId) === user.id);
     await announce(env, code, room.round_number === 3
       ? `<b>${escapeHtml(writer.display_name)}</b> придумал(а) финальный вопрос. Сам(а) на него не отвечает.`
-      : `<b>${escapeHtml(writer.display_name)}</b> отправил(а) вопрос №${promptSlot}. Готово: <b>${questions.length}/${required}</b>.`, true);
+      : `<b>${escapeHtml(writer.display_name)}</b> отправил(а) вопрос. Готово: <b>${questions.length}/${required}</b>.`, true);
     if (questions.length >= required) await beginCustomRound(env, room, players);
     return json({ ok: true, submitted: done, slot: promptSlot, count: questions.length, total: required });
   }
@@ -212,7 +211,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
           const leader = [...players].sort((a, b) => b.score - a.score)[0];
           await announce(env, code, `<b>Финальный вопрос.</b> Лидер по очкам — <b>${escapeHtml(leader?.display_name || "Игрок")}</b>. Только он придумывает вопрос. Сам он на него не отвечает. Две минуты.`, true);
         } else {
-          await announce(env, code, "<b>Свои вопросы · раунд 2.</b> Каждый игрок снова придумывает два вопроса. Автор не отвечает на собственные вопросы. Две минуты.", true);
+          await announce(env, code, "<b>Свои вопросы · раунд 2.</b> Каждый игрок снова придумывает один вопрос. Затем каждый ответит на два вопроса других игроков. Две минуты.", true);
         }
       }
       return json({ ok: true, status: "custom_writing", round: nextRound });
@@ -328,9 +327,9 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
     customPromptSubmitted: room.status === "custom_writing"
       ? (room.round_number === 3
         ? roomQuestionsCache.some(item => Number(item.userId) === userId)
-        : [1, 2].every(slot => roomQuestionsCache.some(item => Number(item.userId) === userId && item.promptSlot === slot))) : false,
+        : roomQuestionsCache.some(item => Number(item.userId) === userId)) : false,
     customPromptSubmittedSlots: roomQuestionsCache.filter(item => Number(item.userId) === userId).map(item => item.promptSlot),
-    customPromptRequired: room.status === "custom_writing" ? (room.round_number === 3 ? 1 : players.length * 2) : 0,
+    customPromptRequired: room.status === "custom_writing" ? (room.round_number === 3 ? 1 : players.length) : 0,
     customPromptWriterName: room.status === "custom_writing" && room.round_number === 3
       ? ([...players].sort((a, b) => b.score - a.score)[0]?.display_name || "") : "",
     isCustomPromptWriter: room.status === "custom_writing" && (room.round_number === 3
@@ -809,7 +808,7 @@ async function playBotQuestions(env: Env, room: Room, players: Player[]): Promis
   const doRoom = env.GAME_ROOMS.getByName(room.code);
   const existing = await doRoom.getRoundQuestions(round);
   const submitted = new Set(existing.map(item => `${item.userId}:${item.promptSlot}`));
-  const slots = round === 3 ? [1] : [1, 2];
+  const slots = [1];
   const pending = writers.flatMap(bot => slots
     .filter(slot => !submitted.has(`${bot.telegram_user_id}:${slot}`))
     .map(slot => ({ bot, slot })));
@@ -826,7 +825,7 @@ async function playBotQuestions(env: Env, room: Room, players: Player[]): Promis
   // If humans finished while bot questions were being generated, let the bot
   // completion unblock the phase immediately instead of waiting for timeout.
   const allQuestions = await doRoom.getRoundQuestions(round);
-  if (round < 3 && allQuestions.length >= players.length * 2) {
+  if (round < 3 && allQuestions.length >= players.length) {
     await beginCustomRound(env, { ...room, status: "custom_writing", round_number: round }, players);
   }
 }
@@ -837,7 +836,7 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   let questions = await doRoom.getRoundQuestions(round);
   const leader = [...players].sort((a, b) => b.score - a.score)[0];
   const writers = round === 3 ? (leader ? [leader] : []) : players;
-  const slots = round === 3 ? [1] : [1, 2];
+  const slots = [1];
   const submitted = new Set(questions.map(item => `${item.userId}:${item.promptSlot}`));
   const missing = writers.flatMap(writer => slots
     .filter(slot => !submitted.has(`${writer.telegram_user_id}:${slot}`))
@@ -879,9 +878,8 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
       for (const slot of [1, 2]) {
         const question = questionBySlot.get(`${writer.telegram_user_id}:${slot}`);
         if (!question) continue;
-        const offset = slot === 1 ? 1 : 2;
-        const respondents = [players[(index + offset) % players.length], players[(index + offset + 1) % players.length]];
-        const pairKey = `custom-${round}-${writer.telegram_user_id}-${slot}`;
+        const respondents = [players[(index + 1) % players.length], players[(index + 2) % players.length]];
+        const pairKey = `custom-${round}-${writer.telegram_user_id}`;
         for (const player of respondents) rows.push({
           room_id: room.id, round_number: round, prompt_id: question.promptId,
           player_telegram_id: player.telegram_user_id, pair_key: pairKey, prompt_slot: slot,
@@ -890,7 +888,7 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
     }
   }
   if (rows.length) await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
-  const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. Каждый игрок задал два вопроса; на каждый отвечают два игрока, кроме автора.`;
+  const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. Каждый игрок задал один вопрос; на каждый отвечают два других игрока.`;
   await Promise.all([
     announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true),
     notify(env, room.code, "next_round", { round }),
