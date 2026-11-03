@@ -23,6 +23,7 @@ type TelegramWebApp = {
     selectionChanged(): void;
   };
   initData?: string;
+  initDataUnsafe?: { start_param?: string; user?: { first_name?: string; last_name?: string } };
   colorScheme?: "light" | "dark";
 };
 
