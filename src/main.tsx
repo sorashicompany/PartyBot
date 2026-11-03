@@ -57,9 +57,9 @@ function TelegramLifecycle() {
     app.ready();
     app.expand();
     app.disableVerticalSwipes?.();
-    app.setHeaderColor?.("#2a1464");
-    app.setBackgroundColor?.("#2a1464");
-    app.setBottomBarColor?.("#1a1028");
+    app.setHeaderColor?.("#100c18");
+    app.setBackgroundColor?.("#100c18");
+    app.setBottomBarColor?.("#100c18");
     const sync = () => syncTelegramViewport(app);
     sync();
     app.onEvent?.("viewportChanged", sync);
