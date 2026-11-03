@@ -875,7 +875,7 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   } else {
     for (let index = 0; index < players.length; index++) {
       const writer = players[index];
-      for (const slot of [1, 2]) {
+      for (const slot of [1]) {
         const question = questionBySlot.get(`${writer.telegram_user_id}:${slot}`);
         if (!question) continue;
         const respondents = [players[(index + 1) % players.length], players[(index + 2) % players.length]];
@@ -935,7 +935,7 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
     }
   }
   await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
-  const label = round === 3 ? "Финал. Один вопрос на всех, можно ставить очки." : `Раунд ${round} из 3. У каждого два вопроса.`;
+  const label = round === 3 ? "Финал. Один вопрос на всех, можно ставить очки." : `Раунд ${round} из 3. У каждого один вопрос; каждый отвечает на два вопроса других игроков.`;
   await Promise.all([
     announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. В этот чат они прилетят, когда откроется голосование — без имён, чтобы не подглядывать.`, true),
     notify(env, room.code, round === 1 && fromStatus !== "round_results" ? "game_started" : "next_round", { round }),
