@@ -137,8 +137,8 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
 
             {room.status === "lobby" && room.isHost ? (
               <div className="stack">
-                <p className="sub">Для старта нужно от 4 до 10 реальных игроков.</p>
-                <button className="btn btn-lime" disabled={busy || room.players.length < 4} onClick={() => void action("/api/game/start")}>Начать шоу</button>
+                <p className="sub">Для старта нужно от 3 до 10 реальных игроков.</p>
+                <button className="btn btn-lime" disabled={busy || room.players.length < 3} onClick={() => void action("/api/game/start")}>Начать шоу</button>
               </div>
             ) : null}
             {room.status === "lobby" && !room.isHost ? <p className="lead">Ожидаем, пока ведущий начнёт игру.</p> : null}
