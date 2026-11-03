@@ -26,6 +26,30 @@ export async function announce(env: Env, code: string, html: string, withButton 
 
 const LETTERS = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К"];
 
+export async function announceVotingCard(
+  env: Env,
+  code: string,
+  html: string,
+  answerIds: string[],
+  round: number,
+  promptIndex: number,
+): Promise<void> {
+  const rooms = await supabaseRequest<Array<{ group_chat_id: number }>>(
+    env,
+    `rooms?code=eq.${code}&select=group_chat_id&limit=1`,
+  );
+  const chatId = Number(rooms[0]?.group_chat_id);
+  if (!Number.isFinite(chatId) || !chatId || !answerIds.length) {
+    await announce(env, code, html, true);
+    return;
+  }
+  const inline_keyboard = answerIds.slice(0, 10).map((id, index) => [{
+    text: `${LETTERS[index]}. Голосовать`,
+    callback_data: `aud|${code}|${round}|${promptIndex}|${id}`,
+  }]);
+  await sendTelegramMessage(env, chatId, html, { inline_keyboard }, "HTML");
+}
+
 export function votingCardText(input: {
   round: number;
   index: number;
@@ -43,7 +67,7 @@ export function votingCardText(input: {
     "",
     lines,
     "",
-    "Имена спрятаны. Выбирайте панч в приложении — в этот чат можно просто орать.",
+    "Имена авторов скрыты. Голосуйте за лучший ответ кнопками прямо под этим сообщением. Зрительский фаворит принесёт автору +500 очков.",
   ].join("\n");
 }
 

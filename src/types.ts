@@ -9,6 +9,7 @@ export interface Env {
   ROOM_TICKET_SECRET: string;
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
+  ENABLE_DEV_BOTS?: string;
 }
 
 export interface TelegramUser {
@@ -19,6 +20,15 @@ export interface TelegramUser {
 }
 
 export interface TelegramUpdate {
+  callback_query?: {
+    id: string;
+    from: TelegramUser;
+    data?: string;
+    message?: {
+      message_id: number;
+      chat: { id: number; type: string };
+    };
+  };
   message?: {
     message_id: number;
     chat: { id: number; type: string };
