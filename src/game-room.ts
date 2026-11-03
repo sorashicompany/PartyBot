@@ -53,6 +53,10 @@ export class GameRoom extends DurableObject<Env> {
         round INTEGER PRIMARY KEY,
         awarded_at INTEGER NOT NULL
       )`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS question_reveals (
+        round INTEGER NOT NULL, prompt_index INTEGER NOT NULL, revealed_at INTEGER NOT NULL,
+        PRIMARY KEY (round, prompt_index)
+      )`);
     });
   }
 
@@ -197,6 +201,19 @@ export class GameRoom extends DurableObject<Env> {
       `SELECT user_id, prompt_id, prompt_slot FROM round_question_slots WHERE round = ? ORDER BY created_at ASC`, round,
     ).toArray() as Array<{ user_id: number; prompt_id: string; prompt_slot: number }>;
     return rows.map(row => ({ userId: Number(row.user_id), promptId: String(row.prompt_id), promptSlot: Number(row.prompt_slot) }));
+  }
+
+  async claimQuestionReveal(round: number, promptIndex: number): Promise<boolean> {
+    const existing = this.ctx.storage.sql.exec(
+      `SELECT round FROM question_reveals WHERE round = ? AND prompt_index = ?`,
+      round, promptIndex,
+    ).toArray();
+    if (existing.length) return false;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO question_reveals (round, prompt_index, revealed_at) VALUES (?, ?, ?)`,
+      round, promptIndex, Date.now(),
+    );
+    return true;
   }
 
   async claimRoundAward(round: number): Promise<boolean> {
