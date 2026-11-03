@@ -180,6 +180,7 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
         body: JSON.stringify(rows),
       });
       if (!botResponse.ok) throw new Error(`Development bot autofill failed: ${botResponse.status} ${(await botResponse.text()).slice(0, 200)}`);
+      await env.GAME_ROOMS.getByName(code).broadcast("room_changed", { code });
     }
   }
 
