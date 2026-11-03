@@ -214,12 +214,14 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
             {room.status === "custom_writing" ? (
               <div className="stack">
                 <h1 className="display">{room.round === 3 ? <>Финальный<br /><em>вопрос.</em></> : <>Твой<br /><em>вопрос.</em></>}</h1>
-                {room.round === 3 ? (
+                {room.isSpectator ? (
+                  <p className="lead">Ты наблюдаешь за игрой. Когда начнётся голосование, сможешь выбрать лучший ответ.</p>
+                ) : room.round === 3 ? (
                   <p className="lead">Лидер по очкам — {room.customPromptWriterName}. Он придумывает финальный вопрос, но сам на него не отвечает.</p>
                 ) : (
                   <p className="lead">Каждый игрок пишет один вопрос. Принято: {room.customPromptCount}/{room.customPromptRequired}.</p>
                 )}
-                {room.customPromptSubmitted ? <p className="lead">Все вопросы отправлены. Ждём остальных.</p> : room.isCustomPromptWriter ? (
+                {room.isSpectator ? null : room.customPromptSubmitted ? <p className="lead">Все вопросы отправлены. Ждём остальных.</p> : room.isCustomPromptWriter ? (
                   <>
                     <label className="field-label" htmlFor="custom-question">{room.round === 3 ? "Финальный вопрос" : "Твой вопрос"} <span>{custom.length}/240</span></label>
                     <textarea id="custom-question" className="area" maxLength={240} value={custom} onChange={e => setCustom(e.target.value)} />
@@ -229,7 +231,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               </div>
             ) : null}
 
-            {room.status === "answering" && !room.prompts[0] ? <div className="stack"><h1 className="display">{room.isFinalQuestionAuthor ? <>Твой<br /><em>финал.</em></> : <>Ответ<br /><em>улетел.</em></>}</h1><p className="lead">{room.isFinalQuestionAuthor ? "Ты придумал финальный вопрос. Сам отвечать не можешь — дождись ответов остальных и голосуй за лучший." : "Ждём остальные ответы. В чат панчи попадут только на голосовании."}</p></div> : null}
+            {room.status === "answering" && !room.prompts[0] ? <div className="stack"><h1 className="display">{room.isSpectator ? <>Смотрим<br /><em>игру.</em></> : room.isFinalQuestionAuthor ? <>Твой<br /><em>финал.</em></> : <>Ответ<br /><em>улетел.</em></>}</h1><p className="lead">{room.isSpectator ? "Сейчас игроки пишут ответы. Как только начнётся голосование, появятся две кнопки." : room.isFinalQuestionAuthor ? "Ты придумал финальный вопрос. Сам отвечать не можешь — дождись ответов остальных и голосуй за лучший." : "Ждём остальные ответы. В чат панчи попадут только на голосовании."}</p></div> : null}
             {room.status === "answering" && room.prompts[0] ? (
               <div className="stack">
                 <h1 className="display">{room.prompts[0].slot === 2 ? "Второй ответ" : "Ответ"}<br /><em>панч.</em></h1>
