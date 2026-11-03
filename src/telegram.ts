@@ -274,10 +274,22 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
         await fail("Ваш голос за этот вопрос уже учтён.");
         return;
       }
-      await supabaseRequest(env, "votes", {
-        method: "POST",
-        body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: query.from.id }),
+      const claimed = await roomStub.claimPlayerVote({
+        round, promptIndex, userId: query.from.id, answerId,
       });
+      if (!claimed) {
+        await fail("Ваш голос за этот вопрос уже учтён.");
+        return;
+      }
+      try {
+        await supabaseRequest(env, "votes", {
+          method: "POST",
+          body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: query.from.id }),
+        });
+      } catch (error) {
+        await roomStub.rollbackPlayerVote({ round, promptIndex, userId: query.from.id });
+        throw error;
+      }
       await roomStub.broadcast("room_changed", { code, playerVoteSubmitted: true });
       await settleRoomVoting(env, code);
     } else {
