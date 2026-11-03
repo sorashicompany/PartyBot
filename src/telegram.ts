@@ -233,15 +233,12 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
     const playerRows = await supabaseRequest<Array<{ telegram_user_id: number }>>(
       env, `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${query.from.id}&select=telegram_user_id&limit=1`,
     );
-    if (playerRows.length) {
-      await fail("Игроки голосуют в приложении. Голосование в чате — для зрителей.");
-      return;
-    }
-    const assignments = await supabaseRequest<Array<{ id: string; prompt_id: string; pair_key?: string | null }>>(
-      env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${round}&select=id,prompt_id,pair_key&order=created_at.asc`,
+    const isPlayer = playerRows.length > 0;
+    const assignments = await supabaseRequest<Array<{ id: string; prompt_id: string; player_telegram_id: number; pair_key?: string | null }>>(
+      env, `round_prompts?room_id=eq.${room.id}&round_number=eq.${round}&select=id,prompt_id,player_telegram_id,pair_key&order=created_at.asc`,
     );
-    const answers = await supabaseRequest<Array<{ id: string; prompt_assignment_id: string; prompt_id: string }>>(
-      env, `answers?room_id=eq.${room.id}&round_number=eq.${round}&select=id,prompt_assignment_id,prompt_id`,
+    const answers = await supabaseRequest<Array<{ id: string; prompt_assignment_id: string; prompt_id: string; author_telegram_id: number }>>(
+      env, `answers?room_id=eq.${room.id}&round_number=eq.${round}&select=id,prompt_assignment_id,prompt_id,author_telegram_id`,
     );
     const units: Array<{ key: string }> = [];
     for (const assignment of assignments) {
@@ -259,35 +256,56 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
       return;
     }
 
-    // The Durable Object is the atomic per-question vote gate. Claim there
-    // first so Telegram retries cannot create duplicate rows in Supabase.
-    const display = displayName(query.from.first_name, query.from.last_name);
+    const ids = answers.filter(answer => pairOf(answer) === active.key).map(answer => answer.id);
     const roomStub = env.GAME_ROOMS.getByName(code);
-    const result = await roomStub.castAudienceVote({
-      round, promptIndex, userId: query.from.id, answerId, userName: display,
-    });
-    if (!result.ok) {
-      await fail(result.error || "Вы уже голосовали за этот вопрос.");
-      return;
-    }
-    try {
+    if (isPlayer) {
+      // Players may vote from the Telegram group as well as from the Mini App.
+      if (Number(target.author_telegram_id) === query.from.id ||
+          (round !== 3 && assignments.some(item =>
+            Number(item.player_telegram_id) === query.from.id && (item.pair_key || item.prompt_id) === active.key))) {
+        await fail("Автор вопроса и авторы ответов не голосуют за этот вопрос.");
+        return;
+      }
+      const existingVotes = await supabaseRequest<Array<{ answer_id: string }>>(
+        env, `votes?answer_id=in.(${ids.join(",")})&voter_telegram_id=eq.${query.from.id}&select=answer_id`,
+      );
+      if (existingVotes.length) {
+        await fail("Ваш голос за этот вопрос уже учтён.");
+        return;
+      }
       await supabaseRequest(env, "votes", {
         method: "POST",
-        body: JSON.stringify({
-          answer_id: answerId,
-          prompt_id: target.prompt_id,
-          voter_telegram_id: query.from.id,
-        }),
+        body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: query.from.id }),
       });
-    } catch (error) {
-      // Keep the DO and shared scoring table consistent if persistence fails.
-      await roomStub.rollbackAudienceVote({ round, promptIndex, userId: query.from.id });
-      throw error;
+      await roomStub.broadcast("room_changed", { code, playerVoteSubmitted: true });
+    } else {
+      // The Durable Object is the atomic audience vote gate. Claim there
+      // first so Telegram retries cannot create duplicate rows in Supabase.
+      const display = displayName(query.from.first_name, query.from.last_name);
+      const result = await roomStub.castAudienceVote({
+        round, promptIndex, userId: query.from.id, answerId, userName: display,
+      });
+      if (!result.ok) {
+        await fail(result.error || "Вы уже голосовали за этот вопрос.");
+        return;
+      }
+      try {
+        await supabaseRequest(env, "votes", {
+          method: "POST",
+          body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: query.from.id }),
+        });
+      } catch (error) {
+        await roomStub.rollbackAudienceVote({ round, promptIndex, userId: query.from.id });
+        throw error;
+      }
     }
-    const ids = answers.filter(answer => pairOf(answer) === active.key).map(answer => answer.id);
+    const savedVotes = await supabaseRequest<Array<{ answer_id: string }>>(
+      env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id`,
+    );
+    const counts = Object.fromEntries(ids.map(id => [id, savedVotes.filter(vote => vote.answer_id === id).length]));
     const letters = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К"];
     const inline_keyboard = ids.slice(0, 10).map((id, index) => [{
-      text: `${letters[index]}. ${result.counts[id] || 0} голосов`,
+      text: `${letters[index]}. ${counts[id] || 0} голосов`,
       callback_data: `aud|${code}|${round}|${promptIndex}|${id}`,
     }]);
     try {
