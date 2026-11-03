@@ -31,6 +31,14 @@ export class GameRoom extends DurableObject<Env> {
         user_id INTEGER PRIMARY KEY,
         last_at INTEGER NOT NULL
       )`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS audience_votes (
+        round INTEGER NOT NULL,
+        prompt_index INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        answer_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (round, prompt_index, user_id)
+      )`);
       this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS round_awards (
         round INTEGER PRIMARY KEY,
         awarded_at INTEGER NOT NULL
@@ -120,6 +128,37 @@ export class GameRoom extends DurableObject<Env> {
     const messages = this.readChat(scope, input.userId);
     await this.broadcast("chat", { scope, messages });
     return { messages };
+  }
+
+  async castAudienceVote(input: { round: number; promptIndex: number; userId: number; answerId: string }): Promise<{ ok: boolean; counts: Record<string, number>; error?: string }> {
+    const existing = this.ctx.storage.sql.exec(
+      `SELECT answer_id FROM audience_votes WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    ).toArray() as Array<{ answer_id: string }>;
+    if (existing.length) return { ok: false, error: "Вы уже проголосовали за этот вопрос", counts: await this.getAudienceCounts(input.round, input.promptIndex) };
+    this.ctx.storage.sql.exec(
+      `INSERT INTO audience_votes (round, prompt_index, user_id, answer_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+      input.round, input.promptIndex, input.userId, input.answerId, Date.now(),
+    );
+    const counts = await this.getAudienceCounts(input.round, input.promptIndex);
+    await this.broadcast("audience_vote", { round: input.round, promptIndex: input.promptIndex, counts });
+    return { ok: true, counts };
+  }
+
+  async getAudienceVotes(round: number, promptIndex: number, userId: number): Promise<{ counts: Record<string, number>; votedAnswerId: string | null }> {
+    const rows = this.ctx.storage.sql.exec(
+      `SELECT answer_id FROM audience_votes WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      round, promptIndex, userId,
+    ).toArray() as Array<{ answer_id: string }>;
+    return { counts: await this.getAudienceCounts(round, promptIndex), votedAnswerId: rows[0]?.answer_id || null };
+  }
+
+  async getAudienceCounts(round: number, promptIndex: number): Promise<Record<string, number>> {
+    const rows = this.ctx.storage.sql.exec(
+      `SELECT answer_id, COUNT(*) AS votes FROM audience_votes WHERE round = ? AND prompt_index = ? GROUP BY answer_id`,
+      round, promptIndex,
+    ).toArray() as Array<{ answer_id: string; votes: number }>;
+    return Object.fromEntries(rows.map(row => [String(row.answer_id), Number(row.votes)]));
   }
 
   async claimRoundAward(round: number): Promise<boolean> {
