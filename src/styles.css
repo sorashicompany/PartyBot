@@ -136,6 +136,7 @@
 
 .scorebug b {
   display: block;
+  animation: score-pop 320ms cubic-bezier(.2, 0, 0, 1);
   font-family: var(--font-display);
   font-size: 1.15rem;
   letter-spacing: -0.04em;
@@ -793,6 +794,10 @@
   border: 0;
 }
 
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(10px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 @keyframes message-in {
   from { opacity: 0; transform: translateY(8px) scale(.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -846,7 +851,8 @@
   .quip,
   .chip,
   .line,
-  .board-row {
+  .board-row,
+  .scorebug b {
     animation: none;
     transition: none;
   }
@@ -877,6 +883,7 @@
 .quip {
   min-width: 0; min-height: 10.5rem; padding: 1rem; display: flex;
   transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease, filter 180ms ease;
+  animation: card-in 260ms cubic-bezier(.2, 0, 0, 1) both;
   will-change: transform;
   flex-direction: column; justify-content: space-between; gap: .75rem;
   text-align: left; border: 2px solid var(--color-ink); border-radius: 1.4rem;
