@@ -323,6 +323,7 @@ async function presentVoting(env: Env, room: Room, players: Player[], startIndex
   const next = { ...room, status: "voting", voting_prompt_index: index, phase_deadline_at: deadline };
   await narrateVotingCard(env, next, assignments, answers, units, index);
   await notify(env, room.code, "voting_started", { round: room.round_number, index });
+  await playBotVotes(env, next, players, assignments, answers, units, index);
   return next;
 }
 
@@ -455,6 +456,102 @@ function chatScope(room: Room): string {
   return `${room.round_number}:${room.voting_prompt_index || 0}`;
 }
 
+
+const BOT_ANSWER_TEMPLATES = [
+  "я бы сделал вид, что так и было задумано, и попросил за это доплату",
+  "позвал бы свидетелей, но они уже заблокировали меня",
+  "сначала уверенно сказал бы «без паники», а потом запаниковал",
+  "это был план б, план а мы потеряли ещё до начала",
+  "объявил бы это новой традицией и назначил себя главным",
+  "сказал бы, что это интерактив, и собрал донаты",
+  "списал бы всё на ретроградный холодильник",
+  "молча ушёл бы за хлебом и вернулся в следующем сезоне",
+  "попросил бы инструкцию у человека, который тоже ничего не понял",
+  "сделал бы презентацию на  forty слайдов и назвал это решением",
+  "уверенно кивнул бы, потому что уверенность — это половина ответа",
+  "позвонил бы маме. у неё на всё есть отдельный пакет с пакетами",
+];
+
+function botAnswer(prompt: string, botId: number, round: number): string {
+  const normalized = prompt.replace(/\\s+/g, " ").trim().replace(/[?!.]+$/, "").toLocaleLowerCase("ru-RU");
+  const hash = Math.abs(botId * 31 + round * 17 + normalized.length * 13);
+  const punchline = BOT_ANSWER_TEMPLATES[hash % BOT_ANSWER_TEMPLATES.length];
+  const lead = ["мой официальный план:", "короткий ответ:", "по версии экспертов:", "я провёл исследование и выяснил:"][hash % 4];
+  return `${lead} ${punchline}`.slice(0, 240);
+}
+
+async function playBotAnswers(env: Env, room: Room, players: Player[]): Promise<void> {
+  const bots = players.filter(player => Number(player.telegram_user_id) < 0);
+  if (!bots.length) return;
+  const assignments = await getAssignments(env, room);
+  const botAssignments = assignments.filter(item => Number(item.player_telegram_id) < 0);
+  if (!botAssignments.length) return;
+  const existing = await supabaseRequest<Array<{ prompt_assignment_id: string }>>(
+    env,
+    `answers?prompt_assignment_id=in.(${botAssignments.map(item => item.id).join(",")})&select=prompt_assignment_id`,
+  );
+  const answered = new Set(existing.map(item => item.prompt_assignment_id));
+  const promptIds = [...new Set(botAssignments.map(item => item.prompt_id))];
+  const prompts = promptIds.length
+    ? await supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`)
+    : [];
+  const promptText = new Map(prompts.map(prompt => [prompt.id, prompt.prompt_text]));
+  const rows = botAssignments.filter(item => !answered.has(item.id)).map(item => ({
+    room_id: room.id,
+    round_number: room.round_number,
+    prompt_assignment_id: item.id,
+    prompt_id: item.prompt_id,
+    author_telegram_id: Number(item.player_telegram_id),
+    answer_text: botAnswer(promptText.get(item.prompt_id) || "что делать?", Number(item.player_telegram_id), room.round_number),
+    wager: 0,
+  }));
+  if (rows.length) {
+    await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify(rows) });
+    await notify(env, room.code, "room_changed", { code: room.code, botAnswers: rows.length });
+  }
+}
+
+async function playBotVotes(
+  env: Env,
+  room: Room,
+  players: Player[],
+  assignments: Assignment[],
+  answers: Answer[],
+  units: Unit[],
+  index: number,
+): Promise<void> {
+  const bots = players.filter(player => Number(player.telegram_user_id) < 0);
+  const unit = units[index];
+  if (!bots.length || !unit) return;
+  const pairOf = pairKeyFor(assignments);
+  const options = answers.filter(answer => pairOf(answer) === unit.key);
+  if (options.length < 2) return;
+  const eligibleBots = bots.filter(bot => room.round_number === 3
+    || !assignments.some(item => Number(item.player_telegram_id) === Number(bot.telegram_user_id)
+      && (item.pair_key || item.prompt_id) === unit.key));
+  for (const bot of eligibleBots) {
+    const eligibleAnswers = options.filter(answer => Number(answer.author_telegram_id) !== Number(bot.telegram_user_id));
+    if (!eligibleAnswers.length) continue;
+    const ids = eligibleAnswers.map(answer => answer.id);
+    const existing = await supabaseRequest<Vote[]>(
+      env,
+      `votes?answer_id=in.(${ids.join(",")})&voter_telegram_id=eq.${bot.telegram_user_id}&select=answer_id,voter_telegram_id`,
+    );
+    if (existing.length) continue;
+    const pickIndex = Math.abs(Number(bot.telegram_user_id) + room.round_number * 19 + index * 7) % eligibleAnswers.length;
+    const picked = eligibleAnswers[pickIndex];
+    await supabaseRequest(env, "votes", {
+      method: "POST",
+      body: JSON.stringify({
+        answer_id: picked.id,
+        prompt_id: picked.prompt_id,
+        voter_telegram_id: Number(bot.telegram_user_id),
+      }),
+    });
+  }
+  await notify(env, room.code, "room_changed", { code: room.code, botVotes: eligibleBots.length });
+}
+
 async function beginCustomRound(env: Env, room: Room, players: Player[]): Promise<void> {
   const round = room.round_number;
   const doRoom = env.GAME_ROOMS.getByName(room.code);
@@ -510,6 +607,7 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. На каждый вопрос отвечают два игрока, кроме автора.`;
   await announce(env, room.code, `<b>${label}</b>\\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true);
   await notify(env, room.code, "next_round", { round });
+  await playBotAnswers(env, room, players);
 }
 
 async function beginRound(env: Env, room: Room, players: Player[], round: number): Promise<void> {
@@ -554,6 +652,7 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
   const label = round === 3 ? "Финал. Один вопрос на всех, можно ставить очки." : `Раунд ${round} из 3. У каждого два вопроса.`;
   await announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. В этот чат они прилетят, когда откроется голосование — без имён, чтобы не подглядывать.`, true);
   await notify(env, room.code, round === 1 && fromStatus !== "round_results" ? "game_started" : "next_round", { round });
+  await playBotAnswers(env, { ...room, round_number: round }, players);
 }
 
 async function ensurePromptPool(env: Env, room: Room, needed: number): Promise<Prompt[]> {
