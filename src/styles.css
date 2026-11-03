@@ -852,6 +852,7 @@
   .switch span,
   .quip,
   .chip,
+  .chip .pts,
   .line,
   .board-row,
   .scorebug b {
