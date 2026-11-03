@@ -204,9 +204,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                 <p className="lead">{room.isHost ? "Как только вас трое — жми старт. Чат группы уже слышит, кто садится." : "Ведущий откроет шоу. Бот в чате напишет, когда начнётся."}</p>
                 {room.isHost ? (
                   <>
-                    <button className="btn btn-ghost" disabled={busy} onClick={() => void action("/api/game/settings", { customEnabled: !room.customPromptsEnabled })}>
-                      {room.customPromptsEnabled ? "Свои вопросы включены" : "Играть колодой бота"}
-                    </button>
+                    <p className="lead">В раундах 1 и 2 каждый игрок придумывает по два вопроса. Затем другие игроки отвечают, и зал голосует за ответы.</p>
                     <button className="btn btn-yellow" disabled={busy || room.players.length < 3} onClick={() => void action("/api/game/start")}>Начать шоу</button>
                   </>
                 ) : null}
