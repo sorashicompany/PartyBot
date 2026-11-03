@@ -555,20 +555,21 @@ async function awardQuestionPoints(
   const doRoom = env.GAME_ROOMS.getByName(room.code);
   const claimed = await doRoom.claimQuestionAward(room.round_number, promptIndex);
   if (!claimed) return reloadPlayers(env, room.id);
-  const ids = answers.map(answer => answer.id);
-  const assignments = await getAssignments(env, room);
-  const playerIds = new Set(players.map(player => Number(player.telegram_user_id)));
-  const [votes, audienceCounts] = await Promise.all([
-    supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id,voter_telegram_id`),
-    doRoom.getAudienceCounts(room.round_number, promptIndex),
-  ]);
-  const playerVotes = votes.filter(vote => playerIds.has(Number(vote.voter_telegram_id)));
-  const totalPlayerVotes = playerVotes.length;
-  const eligible = expectedVoters(room.round_number, players, assignments, unit.key);
-  const audienceHigh = Math.max(0, ...Object.values(audienceCounts));
-  const audienceWinners = answers.filter(answer => audienceHigh > 0 && (audienceCounts[answer.id] || 0) === audienceHigh);
-  const audienceShare = audienceWinners.length ? Math.floor(500 / audienceWinners.length) : 0;
+  let applied = false;
   try {
+    const ids = answers.map(answer => answer.id);
+    const assignments = await getAssignments(env, room);
+    const playerIds = new Set(players.map(player => Number(player.telegram_user_id)));
+    const [votes, audienceCounts] = await Promise.all([
+      supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id,voter_telegram_id`),
+      doRoom.getAudienceCounts(room.round_number, promptIndex),
+    ]);
+    const playerVotes = votes.filter(vote => playerIds.has(Number(vote.voter_telegram_id)));
+    const totalPlayerVotes = playerVotes.length;
+    const eligible = expectedVoters(room.round_number, players, assignments, unit.key);
+    const audienceHigh = Math.max(0, ...Object.values(audienceCounts));
+    const audienceWinners = answers.filter(answer => audienceHigh > 0 && (audienceCounts[answer.id] || 0) === audienceHigh);
+    const audienceShare = audienceWinners.length ? Math.floor(500 / audienceWinners.length) : 0;
     for (const answer of answers) {
       const playerCount = playerVotes.filter(vote => vote.answer_id === answer.id).length;
       const sweep = playerCount > 0 && playerCount === totalPlayerVotes && playerCount >= eligible ? 1000 : 0;
@@ -580,9 +581,12 @@ async function awardQuestionPoints(
         method: "PATCH",
         body: JSON.stringify({ score: Math.max(0, author.score + raw) }),
       });
+      applied = true;
     }
   } catch (error) {
-    // Keep the award claim to prevent duplicate points if a prior PATCH landed.
+    // Roll back only when no score update could have landed. If a PATCH has
+    // already succeeded, retain the claim to prevent awarding it twice.
+    if (!applied) await doRoom.rollbackQuestionAward(room.round_number, promptIndex);
     throw error;
   }
   return reloadPlayers(env, room.id);
