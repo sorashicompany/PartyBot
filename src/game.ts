@@ -465,6 +465,7 @@ async function settleVoting(env: Env, room: Room, players: Player[], force: bool
   const moved = won
     ? { ...room, status: "question_results", voting_prompt_index: index, phase_deadline_at: deadline }
     : (await freshRoom(env, room.code)) || room;
+  if (won) await notify(env, room.code, "question_results", { round: room.round_number, index });
   return { room: moved, players };
 }
 
