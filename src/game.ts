@@ -267,6 +267,24 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
       const author = players.find(player => Number(player.telegram_user_id) === Number(answerItem.author_telegram_id));
       resultPoints.set(answerItem.id, author ? Math.max(0, author.score + raw) - author.score : raw);
     }
+  } else if (room.status === "question_results" && room.round_number === 3 && active) {
+    const playerVoteRows = activeVotes.filter(vote => playerIdsForState.has(Number(vote.voter_telegram_id)));
+    const playerHigh = Math.max(0, ...activeAnswers.map(answer =>
+      playerVoteRows.filter(vote => vote.answer_id === answer.id).length));
+    const playerWinners = activeAnswers.filter(answer =>
+      playerHigh > 0 && playerVoteRows.filter(vote => vote.answer_id === answer.id).length === playerHigh);
+    const wagerPool = activeAnswers.reduce((sum, answer) => sum + Math.min(Number(answer.wager || 0), 1000000), 0);
+    const finalShare = playerWinners.length ? Math.floor(wagerPool / playerWinners.length) : 0;
+    const audienceHigh = Math.max(0, ...Object.values(audienceCounts));
+    const audienceWinners = activeAnswers.filter(answer => audienceHigh > 0 && (audienceCounts[answer.id] || 0) === audienceHigh);
+    const audienceShare = audienceWinners.length ? Math.floor(500 / audienceWinners.length) : 0;
+    for (const answerItem of activeAnswers) {
+      const author = players.find(player => Number(player.telegram_user_id) === Number(answerItem.author_telegram_id));
+      const raw = -Math.min(Number(answerItem.wager || 0), 1000000)
+        + (playerWinners.some(item => item.id === answerItem.id) ? finalShare : 0)
+        + (audienceWinners.some(item => item.id === answerItem.id) ? audienceShare : 0);
+      resultPoints.set(answerItem.id, author ? Math.max(0, author.score + raw) - author.score : raw);
+    }
   }
   const roomQuestionsCache = room.status === "custom_writing"
     ? await env.GAME_ROOMS.getByName(room.code).getRoundQuestions(room.round_number) : [];
