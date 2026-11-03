@@ -1,4 +1,5 @@
 import { announce, scoreboardText, votingCardText } from "./announce";
+import { escapeHtml } from "./telegram";
 import { supabaseRequest } from "./supabase";
 import type { Env } from "./types";
 
@@ -85,6 +86,8 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     await supabaseRequest(env, "room_custom_prompts", { method: "POST", body: JSON.stringify(prompts.map(p => ({ room_id: room.id, prompt_text: p.prompt_text, prompt_id: p.id, created_by_telegram_id: user.id }))) });
     const rows = await supabaseRequest<Array<{ created_by_telegram_id: number }>>(env, `room_custom_prompts?room_id=eq.${room.id}&select=created_by_telegram_id`);
     const authors = new Set(rows.map(row => Number(row.created_by_telegram_id)));
+    const authorName = players.find(player => Number(player.telegram_user_id) === user.id)?.display_name || user.first_name;
+    await announce(env, code, `<b>${escapeHtml(authorName)}</b> отправил(а) свою колоду. Готово: <b>${authors.size}/${players.length}</b> игроков.`, true);
     if (authors.size >= players.length) await beginRound(env, room, players, 1);
     return json({ ok: true });
   }
@@ -109,6 +112,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       wager: room.round_number === 3 ? Math.max(0, Math.min(Number(body.wager || 0), score)) : 0,
     }) });
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`);
+    await announce(env, code, `Ответ принят: <b>${answers.length}/${assignments.length}</b>. Ответы останутся скрыты до голосования.`, false);
     if (answers.length >= assignments.length) await presentVoting(env, room, players, 0);
     return json({ ok: true, submitted: true, count: answers.length, total: assignments.length });
   }
@@ -134,6 +138,9 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       : [];
     if (cast.length) return json({ error: "Голос уже учтён" }, 409);
     await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
+    const updatedVotes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${unitAnswerIds.join(",")})&select=answer_id,voter_telegram_id`);
+    const voterCount = new Set(updatedVotes.map(vote => Number(vote.voter_telegram_id))).size;
+    await announce(env, code, `Голос учтён: <b>${voterCount}/${expectedVoters(room.round_number, players, assignments, active.key)}</b>. Имена голосующих не публикуются.`, false);
     const settled = await settleVoting(env, room, players, false);
     return json({ ok: true, status: settled.room.status });
   }
@@ -151,6 +158,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       text,
     });
     if (result.error) return json({ error: result.error, messages: result.messages }, 429);
+    await announce(env, code, `<b>Зал · ${escapeHtml(player?.display_name || user.first_name)}</b>\n${escapeHtml(text)}`, false);
     return json({ ok: true, messages: result.messages });
   }
 
