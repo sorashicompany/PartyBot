@@ -72,7 +72,7 @@ export default {
         const room = rooms[0];
         if (!room || ["finished", "cancelled"].includes(room.status)) return Response.json({ error: "Room not found or closed" }, { status: 404, headers: corsHeaders });
 
-        const players = await supabaseRequest<Array<{ telegram_user_id: number; display_name: string }>>(env, `room_players?room_id=eq.${room.id}&telegram_user_id=gt.0&select=telegram_user_id,display_name`);
+        const players = await supabaseRequest<Array<{ telegram_user_id: number; display_name: string }>>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name`);
         const name = [user.first_name, user.last_name].filter(Boolean).join(" ").slice(0, 80) || "Player";
         const existingPlayer = players.find(p => Number(p.telegram_user_id) === user.id);
         if (existingPlayer) {
