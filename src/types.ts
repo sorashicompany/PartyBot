@@ -19,6 +19,15 @@ export interface TelegramUser {
 }
 
 export interface TelegramUpdate {
+  callback_query?: {
+    id: string;
+    from: TelegramUser;
+    data?: string;
+    message?: {
+      message_id: number;
+      chat: { id: number; type: string };
+    };
+  };
   message?: {
     message_id: number;
     chat: { id: number; type: string };
