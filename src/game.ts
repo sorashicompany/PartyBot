@@ -564,10 +564,10 @@ async function playBotVotes(
   await notify(env, room.code, "room_changed", { code: room.code, botVotes: eligibleBots.length });
 }
 
-function botQuestion(bot: Player, round: number): string {
+function botQuestion(bot: Player, round: number, slot = 1): string {
   const subjects = ["на вечеринке", "в семейном чате", "на первом свидании", "в офисе в понедельник", "во время важного собеседования", "в отпуске с друзьями", "на свадьбе", "в очереди за кофе"];
   const twists = ["Что самое нелепое может пойти не так", "Какой самый странный поступок можно совершить", "Как объяснить окружающим, почему внезапно", "Что гарантированно превратит обычный день в легенду", "Какой секрет лучше никогда не раскрывать", "Как выкрутиться, если внезапно выяснилось"];
-  const seed = Math.abs(Number(bot.telegram_user_id)) + round * 31;
+  const seed = Math.abs(Number(bot.telegram_user_id)) + round * 31 + slot * 13;
   return `${twists[seed % twists.length]} ${subjects[Math.floor(seed / 7) % subjects.length]}?`;
 }
 
