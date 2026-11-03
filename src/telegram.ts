@@ -290,12 +290,19 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
       text: `${letters[index]}. ${result.counts[id] || 0} голосов`,
       callback_data: `aud|${code}|${round}|${promptIndex}|${id}`,
     }]);
-    const edited = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/editMessageReplyMarkup`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: message.chat.id, message_id: message.message_id, reply_markup: { inline_keyboard } }),
-    });
-    const editResult = await edited.json().catch(() => ({})) as { ok?: boolean; description?: string };
-    if (!edited.ok || !editResult.ok) throw new Error(editResult.description || `Telegram markup update failed: ${edited.status}`);
+    try {
+      const edited = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/editMessageReplyMarkup`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: message.chat.id, message_id: message.message_id, reply_markup: { inline_keyboard } }),
+      });
+      const editResult = await edited.json().catch(() => ({})) as { ok?: boolean; description?: string };
+      if (!edited.ok || !editResult.ok) throw new Error(editResult.description || `Telegram markup update failed: ${edited.status}`);
+    } catch (error) {
+      // The vote is already safely stored; a cosmetic keyboard refresh must
+      // not be reported as a failed vote.
+      console.error(JSON.stringify({ level: "warn", message: "audience keyboard refresh failed", detail: error instanceof Error ? error.message : "unknown" }));
+      await fail("Голос засчитан. Не удалось обновить счётчик на кнопках, но результат сохранён.");
+    }
   } catch (error) {
     console.error(JSON.stringify({ level: "error", message: "audience vote failed", detail: error instanceof Error ? error.message : "unknown" }));
     await fail("Не удалось сохранить голос. Попробуйте ещё раз или проголосуйте в приложении.");
