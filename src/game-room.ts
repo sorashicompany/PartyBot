@@ -164,6 +164,19 @@ export class GameRoom extends DurableObject<Env> {
     return { ok: true, counts };
   }
 
+  async rollbackAudienceVote(input: { round: number; promptIndex: number; userId: number }): Promise<void> {
+    this.ctx.storage.sql.exec(
+      `DELETE FROM audience_votes WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    );
+    this.ctx.storage.sql.exec(
+      `DELETE FROM audience_vote_names WHERE round = ? AND prompt_index = ? AND user_id = ?`,
+      input.round, input.promptIndex, input.userId,
+    );
+    const counts = await this.getAudienceCounts(input.round, input.promptIndex);
+    await this.broadcast("audience_vote", { round: input.round, promptIndex: input.promptIndex, counts });
+  }
+
   async getAudienceVotes(round: number, promptIndex: number, userId: number): Promise<{ counts: Record<string, number>; votedAnswerId: string | null }> {
     const rows = this.ctx.storage.sql.exec(
       `SELECT answer_id FROM audience_votes WHERE round = ? AND prompt_index = ? AND user_id = ?`,
