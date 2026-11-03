@@ -9,7 +9,8 @@ type RoomState = {
   votingPromptIndex: number; votingPromptTotal?: number; customPromptsEnabled: boolean; isPromptAuthor: boolean;
   players: Player[]; prompts: Prompt[]; promptLabels: Record<string, string>;
   activeVotingPromptId: string | null; activePairKey: string | null; answers: Answer[];
-  unitVotes: number; unitVotesNeeded: number; isHost: boolean; chat?: ChatLine[];
+  unitVotes: number; unitVotesNeeded: number; isHost: boolean; isSpectator?: boolean;
+  audienceVoteCounts?: Record<string, number>; audienceVotedAnswerId?: string | null; chat?: ChatLine[];
 };
 type Props = { initData: string; startCode: string; displayName: string };
 
@@ -99,6 +100,20 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
     } finally { setBusy(false); }
   };
 
+  const spectate = async () => {
+    if (!/^[A-HJ-NP-Z2-9]{5}$/i.test(code.trim())) { setError("Нужен код из пяти знаков"); return; }
+    setBusy(true); setError("");
+    try {
+      const data = await api("/api/rooms/spectate", "POST", { code: code.trim().toUpperCase() });
+      const joinedCode = String(data.code || code).toUpperCase();
+      const state = await api(`/api/game/state?code=${encodeURIComponent(joinedCode)}`);
+      setRoom(state as unknown as RoomState);
+      setCode(joinedCode);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось открыть режим зрителя");
+    } finally { setBusy(false); }
+  };
+
   useEffect(() => {
     if (!room && initData && /^[A-HJ-NP-Z2-9]{5}$/i.test(startCode) && !autoJoinAttempted.current) {
       autoJoinAttempted.current = true;
@@ -167,6 +182,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               <label className="field-label" htmlFor="room-code">Код комнаты</label>
               <input id="room-code" className="field" value={code} maxLength={5} autoCapitalize="characters" autoComplete="one-time-code" placeholder="K7P4X" onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, ""))} />
               <button className="btn btn-yellow" type="submit" disabled={busy || code.length !== 5}>{busy ? "Сажаем…" : "Сесть в зал"}</button>
+              <button className="btn btn-ghost" type="button" disabled={busy || code.length !== 5} onClick={() => void spectate()}>Смотреть и голосовать</button>
             </form>
           </section>
         ) : (
@@ -211,8 +227,8 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               </div>
             ) : null}
 
-            {room.status === "answering" && !room.prompts[0] ? <div className="stack"><h1 className="display">Ответ<br /><em>улетел.</em></h1><p className="lead">Ждём остальных. В чат панчи попадут только на голосовании.</p></div> : null}
-            {room.status === "answering" && room.prompts[0] ? (
+            {room.isSpectator && room.status === "answering" ? <div className="stack"><h1 className="display">Зритель<br /><em>в зале.</em></h1><p className="lead">Сейчас игроки пишут ответы. Как только откроется вопрос, здесь появятся варианты для вашего голоса.</p></div> : null}\n            {!room.isSpectator && room.status === "answering" && !room.prompts[0] ? <div className="stack"><h1 className="display">Ответ<br /><em>улетел.</em></h1><p className="lead">Ждём остальных. В чат панчи попадут только на голосовании.</p></div> : null}
+            {!room.isSpectator && room.status === "answering" && room.prompts[0] ? (
               <div className="stack">
                 <h1 className="display">{room.prompts[0].slot === 2 ? "Второй" : "Первый"}<br /><em>панч.</em></h1>
                 <div className="bubble"><p className="kicker">вопрос</p><h2 className="prompt">{room.prompts[0].text}</h2></div>
@@ -247,17 +263,18 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                       className={`quip${item.voted ? " chosen" : ""}`}
                       aria-pressed={item.voted}
                       aria-label={`Ответ ${MARKS[index] || index + 1}: ${item.text}`}
-                      disabled={busy || item.own || lockedVote || room.isPromptAuthor}
-                      onClick={() => void action("/api/game/vote", { answerId: item.id })}
+                      disabled={busy || (room.isSpectator ? Boolean(room.audienceVotedAnswerId) : item.own || lockedVote || room.isPromptAuthor)}
+                      onClick={() => void action(room.isSpectator ? "/api/game/spectator-vote" : "/api/game/vote", { answerId: item.id })}
                     >
                       <span className="mark">{MARKS[index] || index + 1}</span>
                       <p className="punch">{item.text}</p>
-                      <span className="stamp">{item.own ? "это ты" : item.voted ? "голос ушёл" : lockedVote ? "уже выбрал" : "выбрать"}</span>
+                      <span className="stamp">{room.isSpectator ? (room.audienceVotedAnswerId === item.id ? "ваш голос" : room.audienceVotedAnswerId ? "голос принят" : "голосовать") : item.own ? "это ты" : item.voted ? "голос ушёл" : lockedVote ? "уже выбрал" : "выбрать"}</span>
+                      {room.isSpectator ? <span className="stamp">Зрители: {room.audienceVoteCounts?.[item.id] || 0}</span> : null}
                     </button>
                   ))}
                 </div>
-                <p className="sub" role="status" aria-live="polite">{lockedVote ? "Ждём зал." : `Голоса ${room.unitVotes}/${room.unitVotesNeeded}`}</p>
-                <Audience chat={room.chat || []} draft={draft} busy={busy} logRef={logRef} onDraft={setDraft} onSend={(text) => void action("/api/game/chat", { text })} />
+                <p className="sub" role="status" aria-live="polite">{room.isSpectator ? (room.audienceVotedAnswerId ? "Голос зрителя учтён. Победитель получит +500 очков." : "Выберите лучший ответ. Зрительский фаворит получит бонус +500.") : lockedVote ? "Ждём зал." : `Голоса ${room.unitVotes}/${room.unitVotesNeeded}`}</p>
+                {!room.isSpectator ? <Audience chat={room.chat || []} draft={draft} busy={busy} logRef={logRef} onDraft={setDraft} onSend={(text) => void action("/api/game/chat", { text })} /> : <p className="sub">Режим зрителя · один голос на каждый вопрос</p>}
               </div>
             ) : null}
 
