@@ -63,17 +63,18 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (Number(room.host_telegram_id) !== user.id) return json({ error: "Только ведущий запускает шоу" }, 403);
     if (room.status !== "lobby") return json({ error: "Шоу уже началось" }, 409);
     if (players.length < 3 || players.length > 10) return json({ error: "Нужно от 3 до 10 игроков" }, 409);
-    if (room.custom_prompts_enabled) {
-      const deadline = new Date(Date.now() + CUSTOM_MS).toISOString();
-      const won = await casRoom(env, room.id, { status: "lobby" }, { status: "custom_writing", phase_deadline_at: deadline, round_number: 1 });
-      if (won) {
-        await playBotQuestions(env, { ...room, status: "custom_writing", round_number: 1 }, players);
-        await announce(env, code, "<b>Своя колода.</b>\nКаждый игрок придумывает два вопроса. На это две минуты. Автор не отвечает на собственные вопросы.", true);
-      }
-      return json({ ok: true, status: "custom_writing", round: 1 });
+    // Rounds 1 and 2 always use two questions written by every player.
+    await supabaseRequest(env, `rooms?id=eq.${room.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ custom_prompts_enabled: true }),
+    });
+    const deadline = new Date(Date.now() + CUSTOM_MS).toISOString();
+    const won = await casRoom(env, room.id, { status: "lobby" }, { status: "custom_writing", phase_deadline_at: deadline, round_number: 1 });
+    if (won) {
+      await playBotQuestions(env, { ...room, status: "custom_writing", round_number: 1, custom_prompts_enabled: true }, players);
+      await announce(env, code, "<b>Раунд 1 · вопросы игроков.</b>\\nКаждый игрок придумывает два вопроса. На это две минуты. Автор не отвечает на собственные вопросы.", true);
     }
-    await beginRound(env, room, players, 1);
-    return json({ ok: true, status: "answering", round: 1 });
+    return json({ ok: true, status: "custom_writing", round: 1 });
   }
 
   if (url.pathname === "/api/game/custom-prompts" && request.method === "POST") {
@@ -201,7 +202,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
           const leader = [...players].sort((a, b) => b.score - a.score)[0];
           await announce(env, code, `<b>Финальный вопрос.</b> Лидер по очкам — <b>${escapeHtml(leader?.display_name || "Игрок")}</b>. Только он придумывает вопрос. Сам он на него не отвечает. Две минуты.`, true);
         } else {
-          await announce(env, code, "<b>Свои вопросы · раунд 2.</b> Каждый игрок придумывает один новый вопрос. Автор не отвечает на собственный вопрос. Две минуты.", true);
+          await announce(env, code, "<b>Свои вопросы · раунд 2.</b> Каждый игрок снова придумывает два вопроса. Автор не отвечает на собственные вопросы. Две минуты.", true);
         }
       }
       return json({ ok: true, status: "custom_writing", round: nextRound });
