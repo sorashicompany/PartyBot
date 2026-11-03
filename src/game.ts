@@ -327,9 +327,8 @@ async function advanceExpiredPhase(env: Env, room: Room, players: Player[]): Pro
 }
 
 async function presentVoting(env: Env, room: Room, players: Player[], startIndex: number): Promise<Room> {
-  const assignments = await getAssignments(env, room);
+  const [assignments, answers] = await Promise.all([getAssignments(env, room), loadAnswers(env, room)]);
   const units = votingUnits(assignments, room.round_number);
-  const answers = await loadAnswers(env, room);
   const pairOf = pairKeyFor(assignments);
   let index = startIndex;
   while (index < units.length && answers.filter(answer => pairOf(answer) === units[index].key).length === 0) index += 1;
@@ -381,14 +380,17 @@ async function announceQuestionResults(
 ): Promise<void> {
   if (!answers.length) return;
   const ids = answers.map(answer => answer.id);
-  const votes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id,voter_telegram_id`);
+  const [votes, audienceVotes, audienceCounts, prompt, assignments] = await Promise.all([
+    supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id,voter_telegram_id`),
+    env.GAME_ROOMS.getByName(room.code).getAudienceVoters(room.round_number, promptIndex),
+    env.GAME_ROOMS.getByName(room.code).getAudienceCounts(room.round_number, promptIndex),
+    supabaseRequest<Prompt[]>(env, `prompts?id=eq.${unit.promptId}&select=id,prompt_text&limit=1`),
+    getAssignments(env, room),
+  ]);
   const playerIds = new Set(players.map(player => Number(player.telegram_user_id)));
   const playerVotes = votes.filter(vote => playerIds.has(Number(vote.voter_telegram_id)));
-  const audienceVotes = await env.GAME_ROOMS.getByName(room.code).getAudienceVoters(room.round_number, promptIndex);
-  const audienceCounts = await env.GAME_ROOMS.getByName(room.code).getAudienceCounts(room.round_number, promptIndex);
-  const prompt = await supabaseRequest<Prompt[]>(env, `prompts?id=eq.${unit.promptId}&select=id,prompt_text&limit=1`);
   const names = new Map(players.map(player => [Number(player.telegram_user_id), player.display_name]));
-  const eligible = expectedVoters(room.round_number, players, await getAssignments(env, room), unit.key);
+  const eligible = expectedVoters(room.round_number, players, assignments, unit.key);
   const totalPlayerVotes = playerVotes.length;
   const playerCounts = answers.map(answer => ({
     answer,
