@@ -260,23 +260,24 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                 {room.isPromptAuthor ? <p className="lead">Ты автор — голосуют другие. Зато чат зала твой.</p> : null}
                 <div className="duel">
                   {(room.status === "question_results" ? room.answers.filter(item => item.pairKey === room.activePairKey) : activeAnswers).map((item, index) => (
-                    <article key={item.id} className={room.status === "question_results" ? "quip result-answer" : "quip" } style={room.status === "question_results" ? { animationDelay: `${index * 120}ms` } : undefined}>
-                      <span className="mark">{MARKS[index] || index + 1}</span>
-                      <p className="punch">{item.text}</p>
-                      {room.status === "question_results" ? (
+                    room.status === "question_results" ? (
+                      <article key={item.id} className="result-answer" style={{ animationDelay: `${index * 120}ms` }}>
+                        <span className="mark">{MARKS[index] || index + 1}</span>
+                        <p className="punch">{item.text}</p>
                         <div className="result-details">
                           <p><b>Автор:</b> {item.name || "Игрок"}</p>
                           <p><b>Голоса:</b> {item.votes}</p>
                           <p><b>Кто голосовал:</b> {item.voters?.length ? item.voters.join(", ") : "никто"}</p>
                           <p className="result-points">{(item.points || 0) > 0 ? "+" : ""}{(item.points || 0).toLocaleString("ru-RU")} очков</p>
                         </div>
-                      ) : (
-                        <>
-                          <span className="stamp">{item.own ? "это ты" : item.voted ? "голос ушёл" : lockedVote ? "уже выбрал" : "выбрать"}</span>
-                          <button className="vote-hit" type="button" aria-label={`Выбрать ответ ${MARKS[index] || index + 1}`} disabled={busy || item.own || lockedVote || room.isPromptAuthor} onClick={() => void action("/api/game/vote", { answerId: item.id })} />
-                        </>
-                      )}
-                    </article>
+                      </article>
+                    ) : (
+                      <button key={item.id} className={`quip${item.voted ? " chosen" : ""}`} aria-pressed={item.voted} aria-label={`Ответ ${MARKS[index] || index + 1}: ${item.text}`} disabled={busy || item.own || lockedVote || room.isPromptAuthor} onClick={() => void action("/api/game/vote", { answerId: item.id })}>
+                        <span className="mark">{MARKS[index] || index + 1}</span>
+                        <p className="punch">{item.text}</p>
+                        <span className="stamp">{item.own ? "это ты" : item.voted ? "голос ушёл" : lockedVote ? "уже выбрал" : "выбрать"}</span>
+                      </button>
+                    )
                   ))}
                 </div>
                 {room.status === "voting" ? (
