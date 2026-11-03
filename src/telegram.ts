@@ -1,4 +1,5 @@
-import { supabaseRequest } from "./supabase";import type { Env, TelegramUpdate } from "./types";
+import { supabaseRequest } from "./supabase";
+import type { Env, TelegramUpdate } from "./types";
 
 export function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -29,6 +30,10 @@ export async function sendTelegramMessage(
 }
 
 export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Promise<void> {
+  if (update.callback_query) {
+    await handleAudienceCallback(env, update.callback_query);
+    return;
+  }
   const message = update.message;
   if (!message?.text || !message.from || !["group", "supergroup"].includes(message.chat.type)) return;
   if (!/^\/party(?:@\w+)?(?:\s|$)/i.test(message.text.trim())) return;
@@ -96,7 +101,7 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
 
 async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
   const data = String(query.data || "");
-  const match = /^aud\\|([A-HJ-NP-Z2-9]{5})\\|(\\d+)\\|(\\d+)\\|([0-9a-f-]{20,40})$/i.exec(data);
+  const match = /^aud\|([A-HJ-NP-Z2-9]{5})\|(\d+)\|(\d+)\|([0-9a-f-]{20,40})$/i.exec(data);
   const reply = async (text: string) => {
     await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/answerCallbackQuery`, {
       method: "POST", headers: { "Content-Type": "application/json" },
