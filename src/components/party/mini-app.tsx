@@ -260,8 +260,8 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                   {activeAnswers.map((item, index) => (
                     <button
                       key={item.id}
-                      className={`quip${item.voted ? " chosen" : ""}`}
-                      aria-pressed={item.voted}
+                      className={`quip${(room.isSpectator ? room.audienceVotedAnswerId === item.id : item.voted) ? " chosen" : ""}`}
+                      aria-pressed={room.isSpectator ? room.audienceVotedAnswerId === item.id : item.voted}
                       aria-label={`Ответ ${MARKS[index] || index + 1}: ${item.text}`}
                       disabled={busy || (room.isSpectator ? Boolean(room.audienceVotedAnswerId) : item.own || lockedVote || room.isPromptAuthor)}
                       onClick={() => void action(room.isSpectator ? "/api/game/spectator-vote" : "/api/game/vote", { answerId: item.id })}
