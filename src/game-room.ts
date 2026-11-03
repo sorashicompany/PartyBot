@@ -153,7 +153,7 @@ export class GameRoom extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       `INSERT OR REPLACE INTO audience_vote_names (round, prompt_index, user_id, answer_id, user_name, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
       input.round, input.promptIndex, input.userId, input.answerId,
-      (input.userName || "Зритель").replace(/\\s+/g, " ").trim().slice(0, 80) || "Зритель", Date.now(),
+      (input.userName || "Зритель").replace(/\s+/g, " ").trim().slice(0, 80) || "Зритель", Date.now(),
     );
     const counts = await this.getAudienceCounts(input.round, input.promptIndex);
     await this.broadcast("audience_vote", { round: input.round, promptIndex: input.promptIndex, counts });
