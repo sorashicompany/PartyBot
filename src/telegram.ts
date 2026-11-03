@@ -108,7 +108,8 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
       body: JSON.stringify({ callback_query_id: query.id, text, show_alert: false }),
     });
   };
-  if (!match || !query.message || !["group", "supergroup"].includes(query.message.chat.type)) {
+  const message = query.message;
+  if (!match || !message || !["group", "supergroup"].includes(message.chat.type)) {
     await reply("Эта кнопка голосования недействительна");
     return;
   }
@@ -118,9 +119,17 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
     env, `rooms?code=eq.${code}&select=id,status,round_number,voting_prompt_index,group_chat_id&limit=1`,
   );
   const room = rooms[0];
-  if (!room || Number(room.group_chat_id) !== query.message.chat.id || room.status !== "voting" ||
+  if (!room || Number(room.group_chat_id) !== message.chat.id || room.status !== "voting" ||
       Number(room.round_number) !== round || Number(room.voting_prompt_index || 0) !== promptIndex) {
     await reply("Это голосование уже закрыто");
+    return;
+  }
+  const playerRows = await supabaseRequest<Array<{ telegram_user_id: number }>>(
+    env,
+    `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${query.from.id}&select=telegram_user_id&limit=1`,
+  );
+  if (playerRows.length) {
+    await reply("Игроки голосуют в приложении. Голосование в чате — для зрителей.");
     return;
   }
   const assignments = await supabaseRequest<Array<{ id: string; prompt_id: string; pair_key?: string | null }>>(
@@ -160,7 +169,7 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
   }]);
   await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/editMessageReplyMarkup`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: query.message.chat.id, message_id: query.message.message_id, reply_markup: { inline_keyboard } }),
+    body: JSON.stringify({ chat_id: query.message.chat.id, message_id: message.message_id, reply_markup: { inline_keyboard } }),
   });
 }
 function displayName(first: string, last?: string): string {
