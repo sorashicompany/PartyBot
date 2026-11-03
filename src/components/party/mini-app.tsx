@@ -187,7 +187,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
             </form>
           </section>
         ) : (
-          <section key={`${room.code}:${room.status}:${room.round}:${room.votingPromptIndex}`} className={`sheet slam-in${room.status === "voting" ? " wide" : ""}`}>
+          <section key={room.code} className={`sheet${room.status === "voting" || room.status === "question_results" ? " wide" : ""}`}>
             <p className="kicker">
               {room.code}
               {room.round ? ` · раунд ${room.round}/3` : " · лобби"}
@@ -250,53 +250,41 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               </div>
             ) : null}
 
-            {room.status === "voting" ? (
+            {room.status === "voting" || room.status === "question_results" ? (
               <div className="stack">
-                <h1 className="display">Кто<br /><em>смешнее?</em></h1>
+                <h1 className="display">{room.status === "question_results" ? <>Голосование<br /><em>закрыто.</em></> : <>Кто<br /><em>смешнее?</em></>}</h1>
                 <div className="bubble">
-                  <p className="kicker">вопрос</p>
+                  <p className="kicker">{room.status === "question_results" ? "результаты вопроса" : "вопрос"}</p>
                   <h2 className="prompt">{room.promptLabels[room.activeVotingPromptId || ""] || "Выбирай панч"}</h2>
                 </div>
                 {room.isPromptAuthor ? <p className="lead">Ты автор — голосуют другие. Зато чат зала твой.</p> : null}
                 <div className="duel">
-                  {activeAnswers.map((item, index) => (
-                    <button
-                      key={item.id}
-                      className={`quip${item.voted ? " chosen" : ""}`}
-                      aria-pressed={item.voted}
-                      aria-label={`Ответ ${MARKS[index] || index + 1}: ${item.text}`}
-                      disabled={busy || item.own || lockedVote || room.isPromptAuthor}
-                      onClick={() => void action("/api/game/vote", { answerId: item.id })}
-                    >
+                  {(room.status === "question_results" ? room.answers.filter(item => item.pairKey === room.activePairKey) : activeAnswers).map((item, index) => (
+                    <article key={item.id} className={room.status === "question_results" ? "quip result-answer" : "quip" } style={room.status === "question_results" ? { animationDelay: `${index * 120}ms` } : undefined}>
                       <span className="mark">{MARKS[index] || index + 1}</span>
                       <p className="punch">{item.text}</p>
-                      <span className="stamp">{item.own ? "это ты" : item.voted ? "голос ушёл" : lockedVote ? "уже выбрал" : "выбрать"}</span>
-                    </button>
+                      {room.status === "question_results" ? (
+                        <div className="result-details">
+                          <p><b>Автор:</b> {item.name || "Игрок"}</p>
+                          <p><b>Голоса:</b> {item.votes}</p>
+                          <p><b>Кто голосовал:</b> {item.voters?.length ? item.voters.join(", ") : "никто"}</p>
+                          <p className="result-points">{(item.points || 0) > 0 ? "+" : ""}{(item.points || 0).toLocaleString("ru-RU")} очков</p>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="stamp">{item.own ? "это ты" : item.voted ? "голос ушёл" : lockedVote ? "уже выбрал" : "выбрать"}</span>
+                          <button className="vote-hit" type="button" aria-label={`Выбрать ответ ${MARKS[index] || index + 1}`} disabled={busy || item.own || lockedVote || room.isPromptAuthor} onClick={() => void action("/api/game/vote", { answerId: item.id })} />
+                        </>
+                      )}
+                    </article>
                   ))}
                 </div>
-                <p className="sub" role="status" aria-live="polite">{lockedVote ? "Ждём зал." : `Голоса ${room.unitVotes}/${room.unitVotesNeeded}`}</p>
-                <Audience chat={room.chat || []} draft={draft} busy={busy} logRef={logRef} onDraft={setDraft} onSend={(text) => void action("/api/game/chat", { text })} />
-              </div>
-            ) : null}
-
-            {room.status === "question_results" ? (
-              <div className="stack question-reveal" aria-live="polite">
-                <h1 className="display">Кто<br /><em>забрал очки?</em></h1>
-                <div className="bubble">
-                  <p className="kicker">вопрос закрыт</p>
-                  <h2 className="prompt">{room.promptLabels[room.activeVotingPromptId || ""] || "Результаты голосования"}</h2>
-                </div>
-                {room.answers.filter(item => item.pairKey === room.activePairKey).map((item, index) => (
-                  <article className="result-answer" key={item.id} style={{ animationDelay: `${index * 90}ms` }}>
-                    <p className="kicker">Ответ {MARKS[index] || index + 1}</p>
-                    <p className="punch">{item.text}</p>
-                    <p><b>Автор:</b> {item.name || "Игрок"}</p>
-                    <p><b>Голоса:</b> {item.votes}</p>
-                    <p><b>Проголосовали:</b> {item.voters?.length ? item.voters.join(", ") : "никто"}</p>
-                    <p className="result-points">{(item.points || 0) > 0 ? "+" : ""}{(item.points || 0).toLocaleString("ru-RU")} очков</p>
-                  </article>
-                ))}
-                <p className="sub">Следующий вопрос откроется автоматически.</p>
+                {room.status === "voting" ? (
+                  <>
+                    <p className="sub" role="status" aria-live="polite">{lockedVote ? "Ждём зал." : `Голоса ${room.unitVotes}/${room.unitVotesNeeded}`}</p>
+                    <Audience chat={room.chat || []} draft={draft} busy={busy} logRef={logRef} onDraft={setDraft} onSend={(text) => void action("/api/game/chat", { text })} />
+                  </>
+                ) : <p className="sub">Следующий вопрос откроется автоматически.</p>}
               </div>
             ) : null}
 
