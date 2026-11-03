@@ -451,7 +451,7 @@ async function settleVoting(env: Env, room: Room, players: Player[], force: bool
   await announceQuestionResults(env, room, players, active, unitAnswers, index);
   // Pause on a dedicated reveal screen so every player sees authors, voters
   // and the per-answer award before the next voting card appears.
-  const deadline = new Date(Date.now() + 8000).toISOString();
+  const deadline = new Date(Date.now() + 5000).toISOString();
   const won = await casRoom(env, room.id, {
     status: "voting",
     voting_prompt_index: index,
