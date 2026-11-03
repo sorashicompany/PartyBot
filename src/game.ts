@@ -817,7 +817,7 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   await Promise.all([
     announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true),
     notify(env, room.code, "next_round", { round }),
-    playBotAnswers(env, room, players),
+    playBotAnswers(env, { ...room, status: "answering", round_number: round }, players),
   ]);
 }
 
@@ -864,7 +864,7 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
   await Promise.all([
     announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. В этот чат они прилетят, когда откроется голосование — без имён, чтобы не подглядывать.`, true),
     notify(env, room.code, round === 1 && fromStatus !== "round_results" ? "game_started" : "next_round", { round }),
-    playBotAnswers(env, { ...room, round_number: round }, players),
+    playBotAnswers(env, { ...room, status: "answering", round_number: round }, players),
   ]);
 }
 
