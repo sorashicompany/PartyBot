@@ -187,7 +187,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
             </form>
           </section>
         ) : (
-          <section className={`sheet slam-in${room.status === "voting" ? " wide" : ""}`}>
+          <section key={`${room.code}:${room.status}:${room.round}:${room.votingPromptIndex}`} className={`sheet slam-in${room.status === "voting" ? " wide" : ""}`}>
             <p className="kicker">
               {room.code}
               {room.round ? ` · раунд ${room.round}/3` : " · лобби"}
