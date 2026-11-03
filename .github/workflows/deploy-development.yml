@@ -3,7 +3,6 @@ name: deploy-development
 on:
   push:
     branches: [feature/spectator-voting-bonus]
-  workflow_dispatch:
 
 jobs:
   deploy:
@@ -24,6 +23,8 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run check
       - run: npm run build
+      - name: Validate development Worker configuration
+        run: npx wrangler deploy --dry-run --config wrangler.dev.jsonc
       - name: Check deployment secrets
         id: check
         run: |
