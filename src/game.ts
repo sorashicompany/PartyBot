@@ -35,7 +35,11 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   let room = rooms[0];
   if (!room) return json({ error: "Комната не найдена" }, 404);
   let players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name,score&order=joined_at.asc`);
-  if (!players.some(player => Number(player.telegram_user_id) === user.id)) return json({ error: "Вы не в этой комнате" }, 403);
+  const isPlayer = players.some(player => Number(player.telegram_user_id) === user.id);
+  const isSpectator = !isPlayer;
+  if (isSpectator && !["custom_writing", "answering", "voting", "question_results", "round_results"].includes(room.status)) {
+    return json({ error: "Вы не в этой комнате" }, 403);
+  }
   const advanced = await advanceExpiredPhase(env, room, players);
   room = advanced.room;
   players = advanced.players;
@@ -142,9 +146,22 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (!active) return json({ error: "Этот вопрос уже закрыт" }, 409);
     const answers = await loadAnswers(env, room);
     const target = answers.find(answer => answer.id === answerId);
-    if (!target || Number(target.author_telegram_id) === user.id) return json({ error: "Свой панч выбирать нельзя" }, 400);
     const pairOf = pairKeyFor(assignments);
-    if (pairOf(target) !== active.key) return json({ error: "Сейчас на экране другой вопрос" }, 400);
+    if (!target || pairOf(target) !== active.key) return json({ error: "Сейчас на экране другой вопрос" }, 400);
+    if (isSpectator) {
+      const viewerName = [user.first_name, user.last_name].filter(Boolean).join(" ").slice(0, 80) || "Зритель";
+      const result = await env.GAME_ROOMS.getByName(code).castAudienceVote({
+        round: room.round_number,
+        promptIndex: Number(room.voting_prompt_index || 0),
+        userId: user.id,
+        answerId,
+        userName: viewerName,
+      });
+      if (!result.ok) return json({ error: result.error || "Голос уже учтён" }, 409);
+      await notify(env, code, "room_changed", { code, audienceVoteSubmitted: true });
+      return json({ ok: true, audience: true, counts: result.counts });
+    }
+    if (Number(target.author_telegram_id) === user.id) return json({ error: "Свой панч выбирать нельзя" }, 400);
     if (room.round_number !== 3 && assignments.some(item => Number(item.player_telegram_id) === user.id && (item.pair_key || item.prompt_id) === active.key)) {
       return json({ error: "Авторы этого вопроса не голосуют" }, 400);
     }
@@ -263,6 +280,9 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   const activePlayerVotes = activeVotes.filter(vote => playerIdsForState.has(Number(vote.voter_telegram_id)));
   const ownVoteTargets = votes.filter(v => Number(v.voter_telegram_id) === userId).map(v => v.answer_id);
   const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
+  const audienceVoteState = room.status === "voting"
+    ? await env.GAME_ROOMS.getByName(room.code).getAudienceVotes(room.round_number, Number(room.voting_prompt_index || 0), userId)
+    : { counts: {} as Record<string, number>, votedAnswerId: null as string | null };
   const audienceRows = room.status === "question_results"
     ? await env.GAME_ROOMS.getByName(room.code).getAudienceVoters(room.round_number, Number(room.voting_prompt_index || 0))
     : [];
@@ -364,7 +384,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
       voters: revealNames ? votes.filter(vote => vote.answer_id === a.id).map(vote =>
         names[String(vote.voter_telegram_id)] || audienceNameById.get(Number(vote.voter_telegram_id)) || "Зритель") : [],
       points: resultPoints.get(a.id),
-      voted: ownVoteTargets.includes(a.id),
+      voted: ownVoteTargets.includes(a.id) || audienceVoteState.votedAnswerId === a.id,
       wager: a.wager || 0,
     })),
     unitVotes: new Set(activePlayerVotes.map(vote => Number(vote.voter_telegram_id))).size,
@@ -373,6 +393,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
     votesNeeded: units.length,
     chat,
     isHost: Number(room.host_telegram_id) === userId,
+    isSpectator,
   };
 }
 
