@@ -10,7 +10,7 @@ type Prompt = { assignmentId: string; promptId: string; text: string; answered: 
 type Answer = { id: string; promptId: string; text: string; name?: string; own: boolean; votes: number; voted: boolean; wager: number };
 type RoomState = {
   code: string; status: string; round: number; deadline: string | null; customPromptCount: number;
-  votingPromptIndex: number; customPromptsEnabled: boolean; players: Player[]; prompts: Prompt[];
+  votingPromptIndex: number; customPromptsEnabled: boolean; isPromptAuthor: boolean; players: Player[]; prompts: Prompt[];
   promptLabels: Record<string,string>; activeVotingPromptId: string | null; answers: Answer[];
   votesCast: number; votesNeeded: number; isHost: boolean;
 };
@@ -145,6 +145,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               </div>
             ) : null}
 
+            {room.status === "answering" && !room.prompts[0] ? <p className="lead">Ответы отправлены. Ждём остальных игроков.</p> : null}
             {room.status === "answering" && room.prompts[0] ? (
               <div className="stack">
                 <p className="kicker">Твой вопрос · {room.prompts[0].slot === 1 ? "первый" : "второй"}</p>
@@ -162,8 +163,8 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               <div className="stack">
                 <p className="kicker">Голосование · {room.votingPromptIndex + 1}</p>
                 <h2 className="prompt">{room.promptLabels[room.activeVotingPromptId || ""] || "Выбери лучший ответ"}</h2>
-                {activeAnswers.map(a => <button key={a.id} className="vcard" disabled={busy || a.own || a.voted || activeAnswers.some(item => item.voted)} onClick={() => void action("/api/game/vote",{answerId:a.id})}><p className="punch">{a.text}</p><span className="stamp">{a.own ? "твой ответ" : a.voted ? "голос учтён" : "выбрать"}</span></button>)}
-                <p className="sub">{room.votesCast ? "Голос принят. Ждём остальных." : "Авторы этой пары не голосуют."}</p>
+                {room.isPromptAuthor ? <p className="lead">Ты автор этого вопроса — здесь голосуют другие игроки.</p> : activeAnswers.map(a => <button key={a.id} className="vcard" disabled={busy || a.own || a.voted || activeAnswers.some(item => item.voted)} onClick={() => void action("/api/game/vote",{answerId:a.id})}><p className="punch">{a.text}</p><span className="stamp">{a.own ? "твой ответ" : a.voted ? "голос учтён" : "выбрать"}</span></button>)}
+                <p className="sub">{activeAnswers.some(item => item.voted) ? "Голос принят. Ждём остальных." : "Выбери ответ, который смешнее."}</p>
               </div>
             ) : null}
 
