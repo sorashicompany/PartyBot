@@ -169,7 +169,7 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
   }]);
   await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/editMessageReplyMarkup`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: query.message.chat.id, message_id: message.message_id, reply_markup: { inline_keyboard } }),
+    body: JSON.stringify({ chat_id: message.chat.id, message_id: message.message_id, reply_markup: { inline_keyboard } }),
   });
 }
 function displayName(first: string, last?: string): string {
