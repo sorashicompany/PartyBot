@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 
 type Player = { name: string; score: number; isHost: boolean; you?: boolean };
 type Prompt = { assignmentId: string; promptId: string; text: string; answered: boolean; slot: number };
-type Answer = { id: string; promptId: string; pairKey?: string; text: string; name?: string; own: boolean; votes: number; voted: boolean; wager: number };
+type Answer = { id: string; promptId: string; pairKey?: string; text: string; name?: string; own: boolean; votes: number; voters?: string[]; points?: number; voted: boolean; wager: number };
 type ChatLine = { id: number; name: string; text: string; mine: boolean; at: number };
 type RoomState = {
   code: string; status: string; round: number; deadline: string | null; customPromptCount: number; customPromptSubmitted: boolean; customPromptSubmittedSlots?: number[]; customPromptRequired: number; customPromptWriterName: string; isCustomPromptWriter: boolean; isFinalQuestionAuthor: boolean;
@@ -278,6 +278,27 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                 </div>
                 <p className="sub" role="status" aria-live="polite">{lockedVote ? "Ждём зал." : `Голоса ${room.unitVotes}/${room.unitVotesNeeded}`}</p>
                 <Audience chat={room.chat || []} draft={draft} busy={busy} logRef={logRef} onDraft={setDraft} onSend={(text) => void action("/api/game/chat", { text })} />
+              </div>
+            ) : null}
+
+            {room.status === "question_results" ? (
+              <div className="stack question-reveal" aria-live="polite">
+                <h1 className="display">Кто<br /><em>забрал очки?</em></h1>
+                <div className="bubble">
+                  <p className="kicker">вопрос закрыт</p>
+                  <h2 className="prompt">{room.promptLabels[room.activeVotingPromptId || ""] || "Результаты голосования"}</h2>
+                </div>
+                {room.answers.filter(item => item.pairKey === room.activePairKey).map((item, index) => (
+                  <article className="result-answer" key={item.id} style={{ animationDelay: `${index * 90}ms` }}>
+                    <p className="kicker">Ответ {MARKS[index] || index + 1}</p>
+                    <p className="punch">{item.text}</p>
+                    <p><b>Автор:</b> {item.name || "Игрок"}</p>
+                    <p><b>Голоса:</b> {item.votes}</p>
+                    <p><b>Проголосовали:</b> {item.voters?.length ? item.voters.join(", ") : "никто"}</p>
+                    <p className="result-points">{(item.points || 0) > 0 ? "+" : ""}{(item.points || 0).toLocaleString("ru-RU")} очков</p>
+                  </article>
+                ))}
+                <p className="sub">Следующий вопрос откроется автоматически.</p>
               </div>
             ) : null}
 
