@@ -368,9 +368,11 @@ async function presentVoting(env: Env, room: Room, players: Player[], startIndex
   let index = startIndex;
   while (index < units.length && answers.filter(answer => pairOf(answer) === units[index].key).length === 0) index += 1;
   if (index >= units.length) return enterResults(env, room, players);
-  const expectStatus = room.status === "voting" ? "voting" : "answering";
+  const expectStatus = room.status;
   const expect: Record<string, string | number> = { status: expectStatus };
-  if (expectStatus === "voting") expect.voting_prompt_index = Number(room.voting_prompt_index || 0);
+  if (expectStatus === "voting" || expectStatus === "question_results") {
+    expect.voting_prompt_index = Number(room.voting_prompt_index || 0);
+  }
   const deadline = new Date(Date.now() + VOTING_MS).toISOString();
   const won = await casRoom(env, room.id, expect, { status: "voting", voting_prompt_index: index, phase_deadline_at: deadline });
   if (!won) return (await freshRoom(env, room.code)) || { ...room, status: "voting", voting_prompt_index: index, phase_deadline_at: deadline };
@@ -481,7 +483,10 @@ async function announceQuestionResults(
 }
 
 async function enterResults(env: Env, room: Room, players: Player[]): Promise<Room> {
-  const expect: Record<string, string | number> = room.status === "answering" ? { status: "answering" } : { status: "voting", voting_prompt_index: Number(room.voting_prompt_index || 0) };
+  const expect: Record<string, string | number> = { status: room.status };
+  if (room.status === "voting" || room.status === "question_results") {
+    expect.voting_prompt_index = Number(room.voting_prompt_index || 0);
+  }
   const won = await casRoom(env, room.id, expect, {
     status: "round_results",
     phase_deadline_at: null,
