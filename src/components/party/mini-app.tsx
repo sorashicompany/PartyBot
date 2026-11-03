@@ -227,7 +227,8 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               </div>
             ) : null}
 
-            {room.isSpectator && room.status === "answering" ? <div className="stack"><h1 className="display">Зритель<br /><em>в зале.</em></h1><p className="lead">Сейчас игроки пишут ответы. Как только откроется вопрос, здесь появятся варианты для вашего голоса.</p></div> : null}\n            {!room.isSpectator && room.status === "answering" && !room.prompts[0] ? <div className="stack"><h1 className="display">Ответ<br /><em>улетел.</em></h1><p className="lead">Ждём остальных. В чат панчи попадут только на голосовании.</p></div> : null}
+            {room.isSpectator && room.status === "answering" ? <div className="stack"><h1 className="display">Зритель<br /><em>в зале.</em></h1><p className="lead">Сейчас игроки пишут ответы. Как только откроется вопрос, здесь появятся варианты для вашего голоса.</p></div> : null}
+            {!room.isSpectator && room.status === "answering" && !room.prompts[0] ? <div className="stack"><h1 className="display">Ответ<br /><em>улетел.</em></h1><p className="lead">Ждём остальных. В чат панчи попадут только на голосовании.</p></div> : null}
             {!room.isSpectator && room.status === "answering" && room.prompts[0] ? (
               <div className="stack">
                 <h1 className="display">{room.prompts[0].slot === 2 ? "Второй" : "Первый"}<br /><em>панч.</em></h1>
