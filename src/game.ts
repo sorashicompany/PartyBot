@@ -156,7 +156,17 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${unitAnswerIds.join(",")})&voter_telegram_id=eq.${user.id}&select=answer_id,voter_telegram_id`)
       : [];
     if (cast.length) return json({ error: "Голос уже учтён" }, 409);
-    await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
+    const doRoom = env.GAME_ROOMS.getByName(code);
+    const claimed = await doRoom.claimPlayerVote({
+      round: room.round_number, promptIndex: Number(room.voting_prompt_index || 0), userId: user.id, answerId,
+    });
+    if (!claimed) return json({ error: "Голос уже учтён" }, 409);
+    try {
+      await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
+    } catch (error) {
+      await doRoom.rollbackPlayerVote({ round: room.round_number, promptIndex: Number(room.voting_prompt_index || 0), userId: user.id });
+      throw error;
+    }
     await notify(env, code, "room_changed", { code, playerVoteSubmitted: true });
     const settled = await settleVoting(env, room, players, false);
     return json({ ok: true, status: settled.room.status });
