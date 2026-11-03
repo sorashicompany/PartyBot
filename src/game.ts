@@ -154,9 +154,6 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       : [];
     if (cast.length) return json({ error: "Голос уже учтён" }, 409);
     await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
-    const playerIds = players.map(player => Number(player.telegram_user_id));
-    const updatedVotes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${unitAnswerIds.join(",")})&voter_telegram_id=in.(${playerIds.join(",")})&select=answer_id,voter_telegram_id`);
-    const voterCount = new Set(updatedVotes.map(vote => Number(vote.voter_telegram_id))).size;
     const settled = await settleVoting(env, room, players, false);
     return json({ ok: true, status: settled.room.status });
   }
