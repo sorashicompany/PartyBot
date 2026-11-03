@@ -1,4 +1,4 @@
-import { announce, scoreboardText, votingCardText } from "./announce";
+import { announce, announceVotingCard, scoreboardText, votingCardText } from "./announce";
 import { escapeHtml } from "./telegram";
 import { supabaseRequest } from "./supabase";
 import type { Env } from "./types";
@@ -374,14 +374,16 @@ async function narrateVotingCard(env: Env, room: Room, assignments: Assignment[]
   if (!unit) return;
   const prompts = await supabaseRequest<Prompt[]>(env, `prompts?id=eq.${unit.promptId}&select=id,prompt_text&limit=1`);
   const pairOf = pairKeyFor(assignments);
-  const texts = answers.filter(answer => pairOf(answer) === unit.key).map(answer => answer.answer_text);
-  await announce(env, room.code, votingCardText({
+  const unitAnswers = answers.filter(answer => pairOf(answer) === unit.key);
+  const texts = unitAnswers.map(answer => answer.answer_text);
+  const html = votingCardText({
     round: room.round_number,
     index,
     total: units.length,
     prompt: prompts[0]?.prompt_text || "Вопрос сгорел по дороге",
     answers: texts,
-  }), true);
+  });
+  await announceVotingCard(env, room.code, html, unitAnswers.map(answer => answer.id), room.round_number, index);
 }
 
 async function bestLaugh(env: Env, room: Room, players: Player[]): Promise<{ prompt: string; answer: string; name: string; votes: number } | null> {
