@@ -397,6 +397,10 @@ async function announceQuestionResults(
   const audienceHigh = Math.max(0, ...Object.values(audienceCounts));
   const audienceWinners = answers.filter(answer => audienceHigh > 0 && (audienceCounts[answer.id] || 0) === audienceHigh);
   const audienceShare = audienceWinners.length ? Math.floor(500 / audienceWinners.length) : 0;
+  const finalHigh = Math.max(0, ...playerCounts.map(row => row.count));
+  const finalWinners = answers.filter(answer => finalHigh > 0 && (playerCounts.find(row => row.answer.id === answer.id)?.count || 0) === finalHigh);
+  const finalPool = answers.reduce((sum, answer) => sum + Math.min(Number(answer.wager || 0), 1000000), 0);
+  const finalShare = finalWinners.length ? Math.floor(finalPool / finalWinners.length) : 0;
   const lines = answers.map(({ id, author_telegram_id, answer_text }) => {
     const playerCount = playerCounts.find(row => row.answer.id === id)?.count || 0;
     const audienceCount = audienceCounts[id] || 0;
@@ -405,8 +409,13 @@ async function announceQuestionResults(
       ...audienceVotes.filter(vote => vote.answerId === id).map(vote => vote.userName),
     ];
     const sweep = room.round_number !== 3 && playerCount > 0 && playerCount === totalPlayerVotes && playerCount >= eligible ? 1000 : 0;
-    const points = room.round_number === 3 ? 0 : playerCount * 1000 + sweep + (audienceWinners.some(answer => answer.id === id) ? audienceShare : 0);
-    const pointLabel = room.round_number === 3 ? "баллы финала будут в итогах" : `+${points.toLocaleString("ru-RU")} очков`;
+    const audienceBonus = audienceWinners.some(answer => answer.id === id) ? audienceShare : 0;
+    const rawPoints = room.round_number === 3
+      ? -Math.min(Number(answers.find(answer => answer.id === id)?.wager || 0), 1000000) + (finalWinners.some(answer => answer.id === id) ? finalShare : 0) + audienceBonus
+      : playerCount * 1000 + sweep + audienceBonus;
+    const author = players.find(player => Number(player.telegram_user_id) === Number(author_telegram_id));
+    const points = author ? Math.max(0, author.score + rawPoints) - author.score : rawPoints;
+    const pointLabel = `${points > 0 ? "+" : ""}${points.toLocaleString("ru-RU")} очков`;
     return `<b>${escapeHtml(names.get(Number(author_telegram_id)) || "Игрок")}</b>: «${escapeHtml(answer_text)}»\nГолоса: <b>${playerCount + audienceCount}</b> (игроки: ${playerCount}, зрители: ${audienceCount})\nКто голосовал: ${voters.length ? voters.map(escapeHtml).join(", ") : "нет голосов"}\n${pointLabel}`;
   });
   await announce(env, room.code, [
