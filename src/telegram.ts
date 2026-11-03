@@ -1,4 +1,5 @@
 import { supabaseRequest } from "./supabase";
+import { settleRoomVoting } from "./game";
 import type { Env, TelegramUpdate } from "./types";
 
 export function escapeHtml(value: string): string {
@@ -278,6 +279,7 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
         body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: query.from.id }),
       });
       await roomStub.broadcast("room_changed", { code, playerVoteSubmitted: true });
+      await settleRoomVoting(env, code);
     } else {
       // The Durable Object is the atomic audience vote gate. Claim there
       // first so Telegram retries cannot create duplicate rows in Supabase.
