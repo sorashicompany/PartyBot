@@ -51,8 +51,6 @@ jobs:
         run: npx wrangler deploy --config wrangler.dev.jsonc
       - name: Configure the separate Telegram test bot
         if: steps.check.outputs.ready == 'true'
-        env:
-          TELEGRAM_SECRET_HASH: ${{ env.TELEGRAM_WEBHOOK_SECRET }}
         run: |
           node --input-type=module <<'NODE'
           import { createHash } from "node:crypto";
