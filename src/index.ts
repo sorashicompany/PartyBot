@@ -1,3 +1,4 @@
+import { announceJoin } from "./announce";
 import { GameRoom } from "./game-room";
 import { handleTelegramUpdate } from "./telegram";
 import { supabaseRequest } from "./supabase";
@@ -27,7 +28,7 @@ export default {
         const body = await request.json() as { score?: number; place?: number };
         const score = Number(body.score);
         const place = Number(body.place);
-        if (!Number.isInteger(score) || score < 0 || score > 100000 || !Number.isInteger(place) || place < 0 || place > 8) {
+        if (!Number.isInteger(score) || score < 0 || score > 100000 || !Number.isInteger(place) || place < 1 || place > 10) {
           return Response.json({ error: "Invalid game result" }, { status: 400, headers: corsHeaders });
         }
         await supabaseRequest(env, "rpc/record_party_game_result", {
@@ -79,9 +80,10 @@ export default {
             await supabaseRequest(env, `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${user.id}`, { method: "PATCH", body: JSON.stringify({ display_name: name }) });
           }
         } else {
-          if (room.status !== "lobby") return Response.json({ error: "Game already started" }, { status: 409, headers: corsHeaders });
-          if (players.length >= 10) return Response.json({ error: "Room is full" }, { status: 409, headers: corsHeaders });
+          if (room.status !== "lobby") return Response.json({ error: "Шоу уже началось" }, { status: 409, headers: corsHeaders });
+          if (players.length >= 10) return Response.json({ error: "Зал полон" }, { status: 409, headers: corsHeaders });
           await supabaseRequest(env, "room_players", { method: "POST", body: JSON.stringify({ room_id: room.id, telegram_user_id: user.id, display_name: name }) });
+          ctx.waitUntil(announceJoin(env, room.code, name, players.length + 1));
         }
         const ticket = await createRoomTicket(env, room.code, user.id);
         const stub = env.GAME_ROOMS.getByName(room.code);

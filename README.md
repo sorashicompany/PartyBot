@@ -1,13 +1,29 @@
 # Сораши Пати — Telegram Mini App
 
-Исходная игра перенесена из `sorashicompany/partygame2`: React-интерфейс, игровой движок, колода вопросов, аудио и стили. Приложение собирается Vite в статические assets и раздаётся Cloudflare Worker.
+Партийная игра в духе Quiplash: бот открывает комнату в групповом чате, игроки отвечают в Mini App, а чат видит ход шоу.
+
+## Что пишет бот в чат
+
+Команда `/party` в группе создаёт комнату. Дальше бот сам присылает в **этот же чат**:
+
+- кто сел в зал;
+- старт раунда (без текстов ответов);
+- каждый вопрос голосования с панчами, но без имён;
+- итог раунда, лучший панч и счёт;
+- финальный пьедестал.
+
+Кнопка под сообщением снова открывает Mini App.
+
+## Чат зала
+
+На экране голосования внутри Mini App есть свой чат. Он живёт только у текущего вопроса и не дублируется в Telegram.
 
 ## Стек
 
 - React + Vite — интерфейс игры.
 - Telegram Mini Apps SDK — запуск внутри Telegram; авторизация проверяется Worker по подписанному `initData`.
-- Cloudflare Workers + Durable Objects — API, Telegram webhook и realtime-комнаты.
-- Supabase Postgres — профили и результаты игр; серверный доступ через service role secret в Worker.
+- Cloudflare Workers + Durable Objects — API, Telegram webhook, realtime и чат голосования.
+- Supabase Postgres — комнаты, ответы, профили и результаты. Серверный доступ через service role secret в Worker.
 
 ## Разработка
 
@@ -24,6 +40,8 @@ npm run deploy
 ```
 
 Перед деплоем в Cloudflare должны быть настроены secrets: `BOT_TOKEN`, `BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`, `ROOM_TICKET_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`. URL Supabase задаётся в `wrangler.jsonc`. Секреты нельзя помещать во frontend или коммитить в репозиторий.
+
+Примените новую миграцию `supabase/migrations/20261103030000_custom_writing_status.sql`, если свои вопросы ещё не включались: без неё статус `custom_writing` не проходит проверку таблицы `rooms`.
 
 ## Telegram
 

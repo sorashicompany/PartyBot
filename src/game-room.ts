@@ -4,9 +4,38 @@ import type { Env } from "./types";
 
 type RoomEvent = { type: string; payload?: unknown; at: number };
 
+export type RoomChatLine = {
+  id: number;
+  name: string;
+  text: string;
+  mine: boolean;
+  at: number;
+};
+
+type ChatRow = { id: number; user_id: number; name: string; body: string; created_at: number };
+
 export class GameRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    ctx.blockConcurrencyWhile(async () => {
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scope TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`);
+      this.ctx.storage.sql.exec(`CREATE INDEX IF NOT EXISTS chat_messages_scope ON chat_messages(scope, id)`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS chat_rate (
+        user_id INTEGER PRIMARY KEY,
+        last_at INTEGER NOT NULL
+      )`);
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS round_awards (
+        round INTEGER PRIMARY KEY,
+        awarded_at INTEGER NOT NULL
+      )`);
+    });
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -42,9 +71,82 @@ export class GameRoom extends DurableObject<Env> {
 
   async broadcast(event: string, payload: unknown): Promise<void> {
     const message: RoomEvent = { type: event, payload, at: Date.now() };
+    const encoded = JSON.stringify(message);
     for (const socket of this.ctx.getWebSockets()) {
-      try { socket.send(JSON.stringify(message)); }
+      try { socket.send(encoded); }
       catch { socket.close(1011, "broadcast failed"); }
     }
+  }
+
+  async listChat(scope: string, userId: number): Promise<RoomChatLine[]> {
+    return this.readChat(scope, userId);
+  }
+
+  async postChat(input: { scope: string; userId: number; name: string; text: string }): Promise<{ messages: RoomChatLine[]; error?: string }> {
+    const text = input.text.replace(/\s+/g, " ").trim().slice(0, 160);
+    const name = input.name.replace(/\s+/g, " ").trim().slice(0, 40) || "Игрок";
+    const scope = input.scope.slice(0, 40);
+    if (!text || !scope) return { messages: this.readChat(scope, input.userId), error: "Пустое сообщение" };
+    const now = Date.now();
+    const recent = this.ctx.storage.sql.exec(
+      `SELECT last_at FROM chat_rate WHERE user_id = ?`,
+      input.userId,
+    ).toArray() as Array<{ last_at: number }>;
+    const last = Number(recent[0]?.last_at || 0);
+    if (now - last < 1200) {
+      return { messages: this.readChat(scope, input.userId), error: "Помедленнее, зал не успевает" };
+    }
+    this.ctx.storage.sql.exec(
+      `INSERT INTO chat_rate (user_id, last_at) VALUES (?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET last_at = excluded.last_at`,
+      input.userId,
+      now,
+    );
+    this.ctx.storage.sql.exec(
+      `INSERT INTO chat_messages (scope, user_id, name, body, created_at) VALUES (?, ?, ?, ?, ?)`,
+      scope,
+      input.userId,
+      name,
+      text,
+      now,
+    );
+    this.ctx.storage.sql.exec(
+      `DELETE FROM chat_messages WHERE scope = ? AND id <= COALESCE((
+        SELECT id FROM chat_messages WHERE scope = ? ORDER BY id DESC LIMIT 1 OFFSET 80
+      ), 0)`,
+      scope,
+      scope,
+    );
+    const messages = this.readChat(scope, input.userId);
+    await this.broadcast("chat", { scope, messages });
+    return { messages };
+  }
+
+  async claimRoundAward(round: number): Promise<boolean> {
+    const existing = this.ctx.storage.sql.exec(
+      `SELECT round FROM round_awards WHERE round = ?`,
+      round,
+    ).toArray();
+    if (existing.length) return false;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO round_awards (round, awarded_at) VALUES (?, ?)`,
+      round,
+      Date.now(),
+    );
+    return true;
+  }
+
+  private readChat(scope: string, userId: number): RoomChatLine[] {
+    const rows = this.ctx.storage.sql.exec(
+      `SELECT id, user_id, name, body, created_at FROM chat_messages WHERE scope = ? ORDER BY id ASC LIMIT 80`,
+      scope,
+    ).toArray() as ChatRow[];
+    return rows.map((row) => ({
+      id: Number(row.id),
+      name: String(row.name),
+      text: String(row.body),
+      mine: Number(row.user_id) === userId,
+      at: Number(row.created_at),
+    }));
   }
 }
