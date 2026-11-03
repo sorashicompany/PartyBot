@@ -1,6 +1,5 @@
 import { supabaseRequest } from "./supabase";
 import type { Env } from "./types";
-import { isBotPlayer, makeBotAnswer, makeBotPrompt } from "./bots";
 
 type MiniUser = { id: number; first_name: string; last_name?: string };
 type Room = { id: string; code: string; host_telegram_id: number; status: string; round_number: number; phase_deadline_at?: string | null; voting_prompt_index?: number; custom_prompts_enabled?: boolean };
@@ -46,7 +45,6 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     if (room.custom_prompts_enabled) {
       const deadline = new Date(Date.now() + 120000).toISOString();
       await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "custom_writing", phase_deadline_at: deadline, updated_at: new Date().toISOString() }) });
-      await createBotCustomPrompts(env, room, players);
       await notify(env, code, "custom_writing", { round: 1 });
       return json({ ok: true, status: "custom_writing", round: 1 });
     }
@@ -82,7 +80,6 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`);
     if (answers.length >= (room.round_number === 3 ? players.length : players.length * 2)) {
       await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", voting_prompt_index: 0, phase_deadline_at: new Date(Date.now() + 20000).toISOString(), updated_at: new Date().toISOString() }) });
-      await castBotVotes(env, room, players);
       await notify(env, code, "voting_started", { round: room.round_number });
     } else {
       await notify(env, code, "answer_received", { count: answers.length, total: players.length });
@@ -166,7 +163,6 @@ async function advanceExpiredPhase(env: Env, room: Room, players: Player[]): Pro
   if (room.status === "answering") {
     const deadline = new Date(Date.now() + 10000).toISOString();
     await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "voting", phase_deadline_at: deadline, updated_at: new Date().toISOString() }) });
-    await castBotVotes(env, room, players);
     await notify(env, room.code, "voting_started", { round: room.round_number });
     return { ...room, status: "voting", phase_deadline_at: deadline };
   }
@@ -217,57 +213,7 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
   }
   await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
   await supabaseRequest(env, `rooms?id=eq.${room.id}`, { method: "PATCH", body: JSON.stringify({ status: "answering", round_number: round, voting_prompt_index: 0, phase_deadline_at: new Date(Date.now() + 60000).toISOString(), updated_at: new Date().toISOString() }) });
-  const assignments = await getAssignments(env, { ...room, round_number: round });
-  const botAnswers = assignments.filter(item => isBotPlayer(Number(item.player_telegram_id))).map(item => {
-    const seed = [...item.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) + round;
-    return { room_id: room.id, round_number: round, prompt_assignment_id: item.id, prompt_id: item.prompt_id, author_telegram_id: item.player_telegram_id, answer_text: makeBotAnswer(seed, available.find(prompt => prompt.id === item.prompt_id)?.prompt_text).toLocaleLowerCase("ru-RU"), wager: 0 };
-  });
-  if (botAnswers.length) await supabaseRequest(env, "answers", { method: "POST", body: JSON.stringify(botAnswers) });
-}
 
-async function createBotCustomPrompts(env: Env, room: Room, players: Player[]): Promise<void> {
-  const bots = players.filter(player => isBotPlayer(Number(player.telegram_user_id)));
-  if (!bots.length) return;
-  const existing = await supabaseRequest<Array<{ created_by_telegram_id: number }>>(
-    env,
-    `room_custom_prompts?room_id=eq.${room.id}&select=created_by_telegram_id`
-  );
-  const submitted = new Set(existing.map(row => Number(row.created_by_telegram_id)));
-  for (const bot of bots) {
-    if (submitted.has(Number(bot.telegram_user_id))) continue;
-    const seed = Math.abs(Number(bot.telegram_user_id));
-    const texts = [makeBotPrompt(seed), makeBotPrompt(seed + 3)];
-    const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify(texts.map(prompt_text => ({ prompt_text, locale: "ru", enabled: false })))
-    });
-    if (inserted.length !== 2) throw new Error("Could not create bot custom prompts");
-    await supabaseRequest(env, "room_custom_prompts", {
-      method: "POST",
-      body: JSON.stringify(inserted.map(prompt => ({
-        room_id: room.id,
-        prompt_text: prompt.prompt_text,
-        prompt_id: prompt.id,
-        created_by_telegram_id: bot.telegram_user_id
-      })))
-    });
-  }
-}
-
-async function castBotVotes(env: Env, room: Room, players: Player[]): Promise<void> {
-  const assignments = await getAssignments(env, room);
-  const botIds = players.map(p => Number(p.telegram_user_id)).filter(isBotPlayer);
-  if (!botIds.length) return;
-  const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id,prompt_id,author_telegram_id`);
-  const allPromptIds = [...new Set(assignments.map(a => a.prompt_id))];
-  const votes: Array<{ answer_id: string; prompt_id: string; voter_telegram_id: number }> = [];
-  for (const botId of botIds) for (const promptId of allPromptIds) {
-    if (answers.some(a => a.prompt_id === promptId && Number(a.author_telegram_id) === botId)) continue;
-    const options = answers.filter(a => a.prompt_id === promptId && Number(a.author_telegram_id) !== botId);
-    if (options.length) votes.push({ answer_id: options[randomIndex(options.length)].id, prompt_id: promptId, voter_telegram_id: botId });
-  }
-  if (votes.length) await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify(votes) });
 }
 
 async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promise<void> {
