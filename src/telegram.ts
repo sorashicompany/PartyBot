@@ -259,23 +259,30 @@ async function handleAudienceCallback(env: Env, query: NonNullable<TelegramUpdat
       return;
     }
 
-    // Store the vote in the shared results table as well as the Durable Object
-    // counter. This keeps Telegram votes visible to scoring and result reports.
-    await supabaseRequest(env, "votes", {
-      method: "POST",
-      body: JSON.stringify({
-        answer_id: answerId,
-        prompt_id: target.prompt_id,
-        voter_telegram_id: query.from.id,
-      }),
-    });
+    // The Durable Object is the atomic per-question vote gate. Claim there
+    // first so Telegram retries cannot create duplicate rows in Supabase.
     const display = displayName(query.from.first_name, query.from.last_name);
-    const result = await env.GAME_ROOMS.getByName(code).castAudienceVote({
+    const roomStub = env.GAME_ROOMS.getByName(code);
+    const result = await roomStub.castAudienceVote({
       round, promptIndex, userId: query.from.id, answerId, userName: display,
     });
     if (!result.ok) {
       await fail(result.error || "Вы уже голосовали за этот вопрос.");
       return;
+    }
+    try {
+      await supabaseRequest(env, "votes", {
+        method: "POST",
+        body: JSON.stringify({
+          answer_id: answerId,
+          prompt_id: target.prompt_id,
+          voter_telegram_id: query.from.id,
+        }),
+      });
+    } catch (error) {
+      // Keep the DO and shared scoring table consistent if persistence fails.
+      await roomStub.rollbackAudienceVote({ round, promptIndex, userId: query.from.id });
+      throw error;
     }
     const ids = answers.filter(answer => pairOf(answer) === active.key).map(answer => answer.id);
     const letters = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К"];
