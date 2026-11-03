@@ -250,6 +250,8 @@ export async function settleRoomVoting(env: Env, code: string): Promise<void> {
 }
 
 async function getState(env: Env, room: Room, players: Player[], userId: number): Promise<Record<string, unknown>> {
+  const isPlayer = players.some(player => Number(player.telegram_user_id) === userId);
+  const isSpectator = !isPlayer;
   if (room.status === "round_results") players = await ensureAwarded(env, room, players);
   else if (room.status === "question_results") players = await reloadPlayers(env, room.id);
   const assignments = room.round_number > 0 ? await getAssignments(env, room) : [];
