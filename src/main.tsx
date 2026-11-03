@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { PartyShow } from "./components/party/show";
+import { MiniApp } from "./components/party/mini-app";
 import "./styles.css";
 
 type TelegramWebApp = {
@@ -75,9 +75,15 @@ function TelegramLifecycle() {
   return null;
 }
 
+const telegramApp = window.Telegram?.WebApp;
+const initData = telegramApp?.initData || "";
+const user = telegramApp?.initDataUnsafe?.user;
+const displayName = [user?.first_name, user?.last_name].filter(Boolean).join(" ");
+const startCode = (telegramApp?.initDataUnsafe?.start_param || new URLSearchParams(window.location.search).get("startapp") || "").toUpperCase();
+
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <TelegramLifecycle />
-    <PartyShow />
+    <MiniApp initData={initData} startCode={startCode} displayName={displayName} />
   </React.StrictMode>,
 );
