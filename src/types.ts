@@ -8,7 +8,8 @@ export interface Env {
   TELEGRAM_WEBHOOK_SECRET: string;
   ROOM_TICKET_SECRET: string;
   SUPABASE_URL: string;
-  SUPABASE_SERVICE_ROLE_KEY: string;\n  ENABLE_DEV_BOTS?: string;
+  SUPABASE_SERVICE_ROLE_KEY: string;
+  ENABLE_DEV_BOTS?: string;
 }
 
 export interface TelegramUser {
