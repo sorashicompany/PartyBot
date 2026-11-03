@@ -68,7 +68,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       const won = await casRoom(env, room.id, { status: "lobby" }, { status: "custom_writing", phase_deadline_at: deadline, round_number: 1 });
       if (won) {
         await playBotQuestions(env, { ...room, status: "custom_writing", round_number: 1 }, players);
-        await announce(env, code, "<b>Своя колода.</b>\nКаждый игрок придумывает один вопрос. На это две минуты. Автор вопроса сам на него не отвечает.", true);
+        await announce(env, code, "<b>Своя колода.</b>\nКаждый игрок придумывает два вопроса. На это две минуты. Автор не отвечает на собственные вопросы.", true);
       }
       return json({ ok: true, status: "custom_writing", round: 1 });
     }
@@ -79,6 +79,8 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   if (url.pathname === "/api/game/custom-prompts" && request.method === "POST") {
     if (room.status !== "custom_writing") return json({ error: "Сейчас вопросы не принимаются" }, 409);
     const question = String(body.prompt || "").replace(/\s+/g, " ").trim();
+    const promptSlot = room.round_number === 3 ? 1 : Number(body.slot);
+    if (![1, 2].includes(promptSlot)) return json({ error: "Укажите номер вопроса: 1 или 2" }, 400);
     if (question.length < 5 || question.length > 240) return json({ error: "Вопрос должен быть от 5 до 240 символов" }, 400);
     const writer = room.round_number === 3
       ? [...players].sort((a, b) => b.score - a.score)[0]
@@ -88,20 +90,23 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     }
     const doRoom = env.GAME_ROOMS.getByName(code);
     const saved = await doRoom.getRoundQuestions(room.round_number);
-    if (saved.some(item => Number(item.userId) === user.id)) return json({ error: "Вы уже отправили вопрос для этого раунда" }, 409);
+    if (saved.some(item => Number(item.userId) === user.id && item.promptSlot === promptSlot)) return json({ error: "Этот вопрос уже отправлен" }, 409);
     const inserted = await supabaseRequest<Prompt[]>(env, "prompts", {
       method: "POST",
       body: JSON.stringify({ prompt_text: question, locale: "ru", enabled: false }),
     });
     if (!inserted[0]?.id) return json({ error: "Не удалось сохранить вопрос" }, 500);
-    await doRoom.saveRoundQuestion({ round: room.round_number, userId: user.id, promptId: inserted[0].id });
+    await doRoom.saveRoundQuestion({ round: room.round_number, userId: user.id, promptId: inserted[0].id, promptSlot });
     const questions = await doRoom.getRoundQuestions(room.round_number);
-    const required = room.round_number === 3 ? 1 : players.length;
+    const required = room.round_number === 3 ? 1 : players.length * 2;
+    const done = room.round_number === 3
+      ? questions.some(item => Number(item.userId) === user.id)
+      : [1, 2].every(slot => questions.some(item => Number(item.userId) === user.id && item.promptSlot === slot));
     await announce(env, code, room.round_number === 3
       ? `<b>${escapeHtml(writer.display_name)}</b> придумал(а) финальный вопрос. Сам(а) на него не отвечает.`
-      : `<b>${escapeHtml(writer.display_name)}</b> отправил(а) вопрос. Готово: <b>${questions.length}/${required}</b>.`, true);
+      : `<b>${escapeHtml(writer.display_name)}</b> отправил(а) вопрос №${promptSlot}. Готово: <b>${questions.length}/${required}</b>.`, true);
     if (questions.length >= required) await beginCustomRound(env, room, players);
-    return json({ ok: true, submitted: true, count: questions.length, total: required });
+    return json({ ok: true, submitted: done, slot: promptSlot, count: questions.length, total: required });
   }
   if (url.pathname === "/api/game/answer" && request.method === "POST") {
     const answerText = String(body.text || "").trim().toLocaleLowerCase("ru-RU");
@@ -226,6 +231,8 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   const activeVotes = votes.filter(vote => activeAnswers.some(answer => answer.id === vote.answer_id));
   const ownVoteTargets = votes.filter(v => Number(v.voter_telegram_id) === userId).map(v => v.answer_id);
   const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
+  const roomQuestionsCache = room.status === "custom_writing"
+    ? await env.GAME_ROOMS.getByName(room.code).getRoundQuestions(room.round_number) : [];
   const scope = chatScope(room);
   let chat: Array<{ id: number; name: string; text: string; mine: boolean; at: number }> = [];
   if (room.status === "voting") {
@@ -234,16 +241,18 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   }
   const showPrompts = room.round_number === 3
     ? ownAssignments
-    : ownAssignments.filter(a => !myAnswers.some(x => x.prompt_assignment_id === a.id)).slice(0, 1);
+    : ownAssignments.filter(a => !myAnswers.some(x => x.prompt_assignment_id === a.id));
   return {
     code: room.code,
     status: room.status,
     round: room.round_number,
     deadline: room.phase_deadline_at || null,
-    customPromptCount: room.status === "custom_writing"
-      ? (await env.GAME_ROOMS.getByName(room.code).getRoundQuestions(room.round_number)).length : 0,
+    customPromptCount: room.status === "custom_writing" ? roomQuestionsCache.length : 0,
     customPromptSubmitted: room.status === "custom_writing"
-      ? (await env.GAME_ROOMS.getByName(room.code).getRoundQuestions(room.round_number)).some(item => Number(item.userId) === userId) : false,
+      ? (room.round_number === 3
+        ? roomQuestionsCache.some(item => Number(item.userId) === userId)
+        : [1, 2].every(slot => roomQuestionsCache.some(item => Number(item.userId) === userId && item.promptSlot === slot))) : false,
+    customPromptSubmittedSlots: roomQuestionsCache.filter(item => Number(item.userId) === userId).map(item => item.promptSlot),
     customPromptRequired: room.status === "custom_writing" ? (room.round_number === 3 ? 1 : players.length) : 0,
     customPromptWriterName: room.status === "custom_writing" && room.round_number === 3
       ? ([...players].sort((a, b) => b.score - a.score)[0]?.display_name || "") : "",
