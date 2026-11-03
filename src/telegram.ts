@@ -155,6 +155,34 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
   });
   if (!playerResponse.ok) throw new Error(`Host membership insert failed: ${playerResponse.status}`);
 
+  // Development-only autofill keeps a newly created room playable without real participants.
+  if (env.ENABLE_DEV_BOTS === "true") {
+    const currentPlayers = await supabaseRequest<Array<{ telegram_user_id: number }>>(
+      env, `room_players?room_id=eq.${roomId}&select=telegram_user_id`,
+    );
+    const botCount = Math.min(2, Math.max(0, 3 - currentPlayers.length));
+    if (botCount > 0) {
+      const names = ["Бот Проверяка", "Панч-Машина", "Капитан Мем", "Случайный Гений", "Лорд Абсурда", "Шутник 3000", "Мисс Ирония", "Профессор Хаос", "Зритель №1"];
+      const now = Date.now();
+      const rows = Array.from({ length: botCount }, (_, index) => ({
+        room_id: roomId,
+        telegram_user_id: -(now * 100 + index + 1),
+        display_name: names[index % names.length],
+        score: 0,
+      }));
+      const botResponse = await fetch(new URL("/rest/v1/room_players", env.SUPABASE_URL), {
+        method: "POST",
+        headers: {
+          apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(rows),
+      });
+      if (!botResponse.ok) throw new Error(`Development bot autofill failed: ${botResponse.status} ${(await botResponse.text()).slice(0, 200)}`);
+    }
+  }
+
   const deepLink = `https://t.me/${env.BOT_USERNAME}?startapp=${code}`;
   await sendTelegramMessage(
     env,
