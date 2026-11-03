@@ -58,10 +58,12 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
         env,
         `room_players?room_id=eq.${room.id}&telegram_user_id=lt.0&select=telegram_user_id`,
       );
-      await fetch(new URL(`/rest/v1/room_players?room_id=eq.${room.id}&telegram_user_id=lt.0`, env.SUPABASE_URL), {
+      const deletion = await fetch(new URL(`/rest/v1/room_players?room_id=eq.${room.id}&telegram_user_id=lt.0`, env.SUPABASE_URL), {
         method: "DELETE",
         headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` },
       });
+      if (!deletion.ok) throw new Error(`Test player deletion failed: ${deletion.status}`);
+      await env.GAME_ROOMS.getByName(room.code).broadcast("room_changed", { code: room.code });
       await sendTelegramMessage(env, message.chat.id, `Удалено тестовых игроков: ${removed.length}.`);
     } else {
       const requested = Number(command.match(/\d+/)?.[0] || 1);
@@ -97,6 +99,7 @@ export async function handleTelegramUpdate(env: Env, update: TelegramUpdate): Pr
         body: JSON.stringify(rows),
       });
       if (!response.ok) throw new Error(`Test player insert failed: ${response.status} ${(await response.text()).slice(0, 200)}`);
+      await env.GAME_ROOMS.getByName(room.code).broadcast("room_changed", { code: room.code });
       await sendTelegramMessage(env, message.chat.id, `Добавлено тестовых игроков: ${count}. В лобби ${current.length + count}/10. Удалить их можно командой /party clearbots.`);
     }
     return;
