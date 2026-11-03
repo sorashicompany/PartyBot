@@ -71,17 +71,22 @@ export default {
         const room = rooms[0];
         if (!room || ["finished", "cancelled"].includes(room.status)) return Response.json({ error: "Room not found or closed" }, { status: 404, headers: corsHeaders });
 
-        const players = await supabaseRequest<Array<{ telegram_user_id: number }>>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id`);
-        if (!players.some(p => Number(p.telegram_user_id) === user.id)) {
+        const players = await supabaseRequest<Array<{ telegram_user_id: number; display_name: string }>>(env, `room_players?room_id=eq.${room.id}&telegram_user_id=gt.0&select=telegram_user_id,display_name`);
+        const name = [user.first_name, user.last_name].filter(Boolean).join(" ").slice(0, 80) || "Player";
+        const existingPlayer = players.find(p => Number(p.telegram_user_id) === user.id);
+        if (existingPlayer) {
+          if (existingPlayer.display_name !== name) {
+            await supabaseRequest(env, `room_players?room_id=eq.${room.id}&telegram_user_id=eq.${user.id}`, { method: "PATCH", body: JSON.stringify({ display_name: name }) });
+          }
+        } else {
           if (room.status !== "lobby") return Response.json({ error: "Game already started" }, { status: 409, headers: corsHeaders });
           if (players.length >= 10) return Response.json({ error: "Room is full" }, { status: 409, headers: corsHeaders });
-          const name = [user.first_name, user.last_name].filter(Boolean).join(" ").slice(0, 80) || "Player";
           await supabaseRequest(env, "room_players", { method: "POST", body: JSON.stringify({ room_id: room.id, telegram_user_id: user.id, display_name: name }) });
         }
         const ticket = await createRoomTicket(env, room.code, user.id);
         const stub = env.GAME_ROOMS.getByName(room.code);
         await stub.broadcast("room_changed", { code: room.code });
-        return Response.json({ ok: true, code: room.code, ticket }, { headers: corsHeaders });
+        return Response.json({ ok: true, code: room.code, ticket, displayName: name }, { headers: corsHeaders });
       }
 
       if (url.pathname.startsWith("/ws/rooms/")) {
