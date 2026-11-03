@@ -817,9 +817,9 @@ async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promis
       const options = answers.filter(answer => pairOf(answer) === key);
       const counts = options.map(answer => ({ answer, count: votes.filter(v => v.answer_id === answer.id).length }));
       const total = counts.reduce((sum, row) => sum + row.count, 0);
-      const audience = Math.max(1, players.length - new Set(options.map(answer => Number(answer.author_telegram_id))).size);
+      const eligibleVoters = expectedVoters(room.round_number, players, assignments, key);
       for (const row of counts) {
-        const sweep = total > 0 && row.count === total && row.count >= audience ? 1000 : 0;
+        const sweep = total > 0 && row.count === total && row.count >= eligibleVoters ? 1000 : 0;
         const points = row.count * 1000 + sweep;
         const author = Number(row.answer.author_telegram_id);
         earned.set(author, (earned.get(author) || 0) + points);
