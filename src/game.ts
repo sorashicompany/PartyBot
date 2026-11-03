@@ -72,7 +72,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     const won = await casRoom(env, room.id, { status: "lobby" }, { status: "custom_writing", phase_deadline_at: deadline, round_number: 1 });
     if (won) {
       await playBotQuestions(env, { ...room, status: "custom_writing", round_number: 1, custom_prompts_enabled: true }, players);
-      await announce(env, code, "<b>Раунд 1 · вопросы игроков.</b>\\nКаждый игрок придумывает два вопроса. На это две минуты. Автор не отвечает на собственные вопросы.", true);
+      await announce(env, code, "<b>Раунд 1 · вопросы игроков.</b>\nКаждый игрок придумывает два вопроса. На это две минуты. Автор не отвечает на собственные вопросы.", true);
     }
     return json({ ok: true, status: "custom_writing", round: 1 });
   }
@@ -781,7 +781,7 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   if (rows.length) await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
   const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. Каждый игрок задал два вопроса; на каждый отвечают два игрока, кроме автора.`;
   await Promise.all([
-    announce(env, room.code, `<b>${label}</b>\\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true),
+    announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true),
     notify(env, room.code, "next_round", { round }),
     playBotAnswers(env, room, players),
   ]);
@@ -828,7 +828,7 @@ async function beginRound(env: Env, room: Room, players: Player[], round: number
   await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
   const label = round === 3 ? "Финал. Один вопрос на всех, можно ставить очки." : `Раунд ${round} из 3. У каждого два вопроса.`;
   await Promise.all([
-    announce(env, room.code, `<b>${label}</b>\\nОтветы пишутся в приложении. В этот чат они прилетят, когда откроется голосование — без имён, чтобы не подглядывать.`, true),
+    announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. В этот чат они прилетят, когда откроется голосование — без имён, чтобы не подглядывать.`, true),
     notify(env, room.code, round === 1 && fromStatus !== "round_results" ? "game_started" : "next_round", { round }),
     playBotAnswers(env, { ...room, round_number: round }, players),
   ]);
