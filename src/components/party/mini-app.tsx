@@ -55,13 +55,13 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
   }, [api, room?.code]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
     if (!room) return;
-    const timer = window.setInterval(() => setRefresh(v => v + 1), 8000);
+    const timer = window.setInterval(() => setRefresh(v => v + 1), 5000);
     return () => window.clearInterval(timer);
   }, [room?.code, room?.status]);
 
