@@ -311,7 +311,7 @@ function Brand({ name, score }: { name: string; score?: number }) {
       </div>
       <div className="scorebug">
         <span>{name}</span>
-        {typeof score === "number" ? <b>{score.toLocaleString("ru-RU")}</b> : null}
+        {typeof score === "number" ? <b key={score}>{score.toLocaleString("ru-RU")}</b> : null}
       </div>
     </header>
   );
