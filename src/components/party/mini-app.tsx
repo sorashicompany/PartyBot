@@ -252,16 +252,16 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
 
             {room.status === "voting" || room.status === "question_results" ? (
               <div className="stack">
-                <h1 className="display">{room.status === "question_results" ? <>Голосование<br /><em>закрыто.</em></> : <>Кто<br /><em>смешнее?</em></>}</h1>
+                <h1 className="display">Кто<br /><em>смешнее?</em></h1>
                 <div className="bubble">
-                  <p className="kicker">{room.status === "question_results" ? "результаты вопроса" : "вопрос"}</p>
+                  <p className="kicker">вопрос</p>
                   <h2 className="prompt">{room.promptLabels[room.activeVotingPromptId || ""] || "Выбирай панч"}</h2>
                 </div>
                 {room.isPromptAuthor ? <p className="lead">Ты автор — голосуют другие. Зато чат зала твой.</p> : null}
                 <div className="duel">
                   {(room.status === "question_results" ? room.answers.filter(item => item.pairKey === room.activePairKey) : activeAnswers).map((item, index) => (
                     room.status === "question_results" ? (
-                      <article key={item.id} className="result-answer" style={{ animationDelay: `${index * 120}ms` }}>
+                      <article key={item.id} className="quip result-answer" style={{ animationDelay: `${index * 120}ms` }}>
                         <span className="mark">{MARKS[index] || index + 1}</span>
                         <p className="punch">{item.text}</p>
                         <div className="result-details">
