@@ -357,8 +357,55 @@ async function settleVoting(env: Env, room: Room, players: Player[], force: bool
     const voters = new Set(votes.map(vote => Number(vote.voter_telegram_id)));
     if (voters.size < expectedVoters(room.round_number, players, assignments, active.key)) return { room, players };
   }
+  await announceQuestionResults(env, room, players, active, unitAnswers, index);
   const moved = await presentVoting(env, { ...room, status: "voting" }, players, index + 1);
   return { room: moved, players: moved.status === "round_results" ? await reloadPlayers(env, room.id) : players };
+}
+
+async function announceQuestionResults(
+  env: Env,
+  room: Room,
+  players: Player[],
+  unit: Unit,
+  answers: Answer[],
+  promptIndex: number,
+): Promise<void> {
+  if (!answers.length) return;
+  const ids = answers.map(answer => answer.id);
+  const votes = await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id,voter_telegram_id`);
+  const playerIds = new Set(players.map(player => Number(player.telegram_user_id)));
+  const playerVotes = votes.filter(vote => playerIds.has(Number(vote.voter_telegram_id)));
+  const audienceVotes = await env.GAME_ROOMS.getByName(room.code).getAudienceVoters(room.round_number, promptIndex);
+  const audienceCounts = await env.GAME_ROOMS.getByName(room.code).getAudienceCounts(room.round_number, promptIndex);
+  const prompt = await supabaseRequest<Prompt[]>(env, `prompts?id=eq.${unit.promptId}&select=id,prompt_text&limit=1`);
+  const names = new Map(players.map(player => [Number(player.telegram_user_id), player.display_name]));
+  const eligible = expectedVoters(room.round_number, players, await getAssignments(env, room), unit.key);
+  const totalPlayerVotes = playerVotes.length;
+  const playerCounts = answers.map(answer => ({
+    answer,
+    count: playerVotes.filter(vote => vote.answer_id === answer.id).length,
+  }));
+  const audienceHigh = Math.max(0, ...Object.values(audienceCounts));
+  const audienceWinners = answers.filter(answer => audienceHigh > 0 && (audienceCounts[answer.id] || 0) === audienceHigh);
+  const audienceShare = audienceWinners.length ? Math.floor(500 / audienceWinners.length) : 0;
+  const lines = answers.map(({ id, author_telegram_id, answer_text }) => {
+    const playerCount = playerCounts.find(row => row.answer.id === id)?.count || 0;
+    const audienceCount = audienceCounts[id] || 0;
+    const voters = [
+      ...playerVotes.filter(vote => vote.answer_id === id).map(vote => names.get(Number(vote.voter_telegram_id)) || "Игрок"),
+      ...audienceVotes.filter(vote => vote.answerId === id).map(vote => vote.userName),
+    ];
+    const sweep = room.round_number !== 3 && playerCount > 0 && playerCount === totalPlayerVotes && playerCount >= eligible ? 1000 : 0;
+    const points = room.round_number === 3 ? 0 : playerCount * 1000 + sweep + (audienceWinners.some(answer => answer.id === id) ? audienceShare : 0);
+    const pointLabel = room.round_number === 3 ? "баллы финала будут в итогах" : `+${points.toLocaleString("ru-RU")} очков`;
+    return `<b>${escapeHtml(names.get(Number(author_telegram_id)) || "Игрок")}</b>: «${escapeHtml(answer_text)}»\nГолоса: <b>${playerCount + audienceCount}</b> (игроки: ${playerCount}, зрители: ${audienceCount})\nКто голосовал: ${voters.length ? voters.map(escapeHtml).join(", ") : "нет голосов"}\n${pointLabel}`;
+  });
+  await announce(env, room.code, [
+    `<b>Итоги вопроса · раунд ${room.round_number}</b>`,
+    escapeHtml(prompt[0]?.prompt_text || "Вопрос"),
+    "",
+    ...lines,
+  ].join("\n\n"), false);
 }
 
 async function enterResults(env: Env, room: Room, players: Player[]): Promise<Room> {
