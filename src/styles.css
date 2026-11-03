@@ -927,3 +927,35 @@
 }
 .sheet.wide { width: min(100%, 68rem); }
 .lead, .sub { margin: .25rem 0 .75rem; }
+
+
+/* Per-question reveal: staggered cards and a clear score delta. */
+.question-reveal { animation: reveal-in 320ms cubic-bezier(.2, 0, 0, 1) both; }
+.result-answer {
+  border: 2px solid var(--line);
+  border-radius: 1.2rem;
+  background: var(--panel);
+  padding: 1rem;
+  animation: row-in 300ms ease-out both;
+  min-width: 0;
+}
+.result-answer .punch { margin: .25rem 0 .8rem; }
+.result-answer p { overflow-wrap: anywhere; }
+.result-answer p + p { margin-top: .4rem; }
+.result-points {
+  display: inline-block;
+  color: var(--color-ink);
+  background: var(--color-lime);
+  border-radius: 999px;
+  padding: .35rem .75rem;
+  font-family: var(--font-display);
+  font-weight: 800;
+  animation: score-pop 420ms cubic-bezier(.2, 0, 0, 1) both;
+}
+@keyframes reveal-in {
+  from { opacity: 0; transform: translateY(12px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .question-reveal, .result-answer, .result-points { animation: none; }
+}
