@@ -97,6 +97,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     });
     if (!inserted[0]?.id) return json({ error: "Не удалось сохранить вопрос" }, 500);
     await doRoom.saveRoundQuestion({ round: room.round_number, userId: user.id, promptId: inserted[0].id, promptSlot });
+    await notify(env, code, "room_changed", { code, customQuestionSubmitted: true });
     const questions = await doRoom.getRoundQuestions(room.round_number);
     const required = room.round_number === 3 ? 1 : players.length * 2;
     const done = room.round_number === 3
@@ -127,6 +128,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       answer_text: answerText,
       wager: room.round_number === 3 ? Math.max(0, Math.min(Number(body.wager || 0), score)) : 0,
     }) });
+    await notify(env, code, "room_changed", { code, answerSubmitted: true });
     const answers = await supabaseRequest<Answer[]>(env, `answers?room_id=eq.${room.id}&round_number=eq.${room.round_number}&select=id`);
     await announce(env, code, `Ответ принят: <b>${answers.length}/${assignments.length}</b>. Ответы останутся скрыты до голосования.`, false);
     if (answers.length >= assignments.length) await presentVoting(env, room, players, 0);
@@ -154,6 +156,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       : [];
     if (cast.length) return json({ error: "Голос уже учтён" }, 409);
     await supabaseRequest(env, "votes", { method: "POST", body: JSON.stringify({ answer_id: answerId, prompt_id: target.prompt_id, voter_telegram_id: user.id }) });
+    await notify(env, code, "room_changed", { code, playerVoteSubmitted: true });
     const settled = await settleVoting(env, room, players, false);
     return json({ ok: true, status: settled.room.status });
   }
