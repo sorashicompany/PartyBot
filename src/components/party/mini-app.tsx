@@ -9,7 +9,7 @@ type RoomState = {
   votingPromptIndex: number; votingPromptTotal?: number; customPromptsEnabled: boolean; isPromptAuthor: boolean;
   players: Player[]; prompts: Prompt[]; promptLabels: Record<string, string>;
   activeVotingPromptId: string | null; activePairKey: string | null; answers: Answer[];
-  unitVotes: number; unitVotesNeeded: number; isHost: boolean; chat?: ChatLine[];
+  unitVotes: number; unitVotesNeeded: number; isHost: boolean; isSpectator?: boolean; chat?: ChatLine[];
 };
 type Props = { initData: string; startCode: string; displayName: string };
 
@@ -253,6 +253,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
             {room.status === "voting" || room.status === "question_results" ? (
               <div className="stack">
                 <h1 className="display">Кто<br /><em>смешнее?</em></h1>
+                {room.isSpectator ? <p className="lead">Вы в зале. Выберите один из двух ответов.</p> : null}
                 <div className="bubble">
                   <p className="kicker">вопрос</p>
                   <h2 className="prompt">{room.promptLabels[room.activeVotingPromptId || ""] || "Выбирай панч"}</h2>
