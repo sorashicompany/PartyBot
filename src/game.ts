@@ -68,7 +68,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
       const won = await casRoom(env, room.id, { status: "lobby" }, { status: "custom_writing", phase_deadline_at: deadline, round_number: 1 });
       if (won) {
         await playBotQuestions(env, { ...room, status: "custom_writing", round_number: 1 }, players);
-        await announce(env, code, "<b>Своя колода.</b>\\nКаждый игрок придумывает один вопрос. На это две минуты. Автор вопроса сам на него не отвечает.", true);
+        await announce(env, code, "<b>Своя колода.</b>\nКаждый игрок придумывает один вопрос. На это две минуты. Автор вопроса сам на него не отвечает.", true);
       }
       return json({ ok: true, status: "custom_writing", round: 1 });
     }
@@ -636,7 +636,7 @@ async function beginCustomRound(env: Env, room: Room, players: Player[]): Promis
   }
   if (rows.length) await supabaseRequest(env, "round_prompts", { method: "POST", body: JSON.stringify(rows) });
   const label = round === 3 ? "Финал. Вопрос лидера — отвечают остальные игроки." : `Раунд ${round} из 3. На каждый вопрос отвечают два игрока, кроме автора.`;
-  await announce(env, room.code, `<b>${label}</b>\\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true);
+  await announce(env, room.code, `<b>${label}</b>\nОтветы пишутся в приложении. Вопросы появятся на голосовании без имён авторов ответов.`, true);
   await notify(env, room.code, "next_round", { round });
   await playBotAnswers(env, room, players);
 }
