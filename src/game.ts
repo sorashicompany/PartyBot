@@ -220,10 +220,20 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   const active = units[Number(room.voting_prompt_index || 0)] || null;
   const ownAssignments = assignments.filter(item => Number(item.player_telegram_id) === userId).sort((a, b) => (a.prompt_slot || 1) - (b.prompt_slot || 1));
   const promptIds = [...new Set(assignments.map(a => a.prompt_id))];
-  const prompts = promptIds.length ? await supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`) : [];
-  const submitted = ["voting", "round_results", "finished"].includes(room.status) ? await loadAnswers(env, room) : [];
-  const votes = submitted.length ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${submitted.map(a => a.id).join(",")})&select=answer_id,voter_telegram_id`) : [];
-  const myAnswers = ownAssignments.length ? await supabaseRequest<Array<{ prompt_assignment_id: string }>>(env, `answers?prompt_assignment_id=in.(${ownAssignments.map(a => a.id).join(",")})&select=prompt_assignment_id`) : [];
+  const [prompts, submitted, myAnswers] = await Promise.all([
+    promptIds.length
+      ? supabaseRequest<Prompt[]>(env, `prompts?id=in.(${promptIds.join(",")})&select=id,prompt_text`)
+      : Promise.resolve([] as Prompt[]),
+    ["voting", "round_results", "finished"].includes(room.status)
+      ? loadAnswers(env, room)
+      : Promise.resolve([] as Answer[]),
+    ownAssignments.length
+      ? supabaseRequest<Array<{ prompt_assignment_id: string }>>(env, `answers?prompt_assignment_id=in.(${ownAssignments.map(a => a.id).join(",")})&select=prompt_assignment_id`)
+      : Promise.resolve([] as Array<{ prompt_assignment_id: string }>),
+  ]);
+  const votes = submitted.length
+    ? await supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${submitted.map(a => a.id).join(",")})&select=answer_id,voter_telegram_id`)
+    : [];
   const pairOf = pairKeyFor(assignments);
   const names = Object.fromEntries(players.map(p => [String(p.telegram_user_id), p.display_name]));
   const revealNames = room.status === "round_results" || room.status === "finished";
