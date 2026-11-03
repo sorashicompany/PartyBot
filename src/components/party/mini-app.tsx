@@ -86,6 +86,8 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
     setBusy(true); setError("");
     try {
       await api(path, "POST", { code: room.code, ...payload });
+      if (path.endsWith("/answer")) setAnswer("");
+      if (path.endsWith("/custom-prompts")) setCustom(["", ""]);
       await loadState();
       setRefresh(v => v + 1);
       window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("medium");
@@ -119,7 +121,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
               <form className="stack" onSubmit={join}>
                 <label className="field-label" htmlFor="room-code">Код комнаты</label>
                 <input id="room-code" className="field" value={code} maxLength={5} autoCapitalize="characters" autoComplete="one-time-code" placeholder="K7P4X" onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g,""))}/>
-                <div className="roster"><li>Игрок: {displayName || "Профиль Telegram"}</li></div>
+                <ul className="roster"><li>Игрок: {displayName || "Профиль Telegram"}</li></ul>
                 <button className="btn btn-lime" type="submit" disabled={busy || code.length !== 5}>{busy ? "Подключаем…" : "Войти в комнату"}</button>
               </form>
             </div>
