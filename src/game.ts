@@ -379,6 +379,8 @@ async function announceQuestionResults(
   promptIndex: number,
 ): Promise<void> {
   if (!answers.length) return;
+  const claimed = await env.GAME_ROOMS.getByName(room.code).claimQuestionReveal(room.round_number, promptIndex);
+  if (!claimed) return;
   const ids = answers.map(answer => answer.id);
   const [votes, audienceVotes, audienceCounts, prompt, assignments] = await Promise.all([
     supabaseRequest<Vote[]>(env, `votes?answer_id=in.(${ids.join(",")})&select=answer_id,voter_telegram_id`),
