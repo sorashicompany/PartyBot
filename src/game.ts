@@ -551,6 +551,20 @@ async function awardRoundPoints(env: Env, room: Room, players: Player[]): Promis
       }
     }
   }
+  const bonusAssignments = await getAssignments(env, room);
+  const bonusPairOf = pairKeyFor(bonusAssignments);
+  const bonusUnits = votingUnits(bonusAssignments, room.round_number);
+  for (let index = 0; index < bonusUnits.length; index++) {
+    const counts = await env.GAME_ROOMS.getByName(room.code).getAudienceCounts(room.round_number, index);
+    const high = Math.max(0, ...Object.values(counts));
+    if (!high) continue;
+    const winnerIds = answers
+      .filter(answer => bonusPairOf(answer) === bonusUnits[index].key && (counts[answer.id] || 0) === high)
+      .map(answer => Number(answer.author_telegram_id));
+    if (!winnerIds.length) continue;
+    const bonusShare = Math.floor(500 / winnerIds.length);
+    for (const author of winnerIds) earned.set(author, (earned.get(author) || 0) + bonusShare);
+  }
   for (const player of players) {
     const delta = earned.get(Number(player.telegram_user_id)) || 0;
     if (!delta) continue;
