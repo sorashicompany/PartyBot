@@ -333,6 +333,8 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .quip:nth-child(odd) { background: var(--cyan); transform: rotate(-1deg); }
 .quip:nth-child(even) { background: var(--pink); color: var(--cream); transform: rotate(1deg); }
+.quip.chosen { outline: 4px solid var(--yellow); outline-offset: 2px; }
+.quip:disabled:not(.chosen) { opacity: 0.72; }
 .quip:nth-child(3) { background: var(--yellow); color: var(--ink); }
 
 .quip:active:not(:disabled) { transform: translate(2px, 2px) rotate(0deg); box-shadow: 3px 3px 0 var(--ink); }

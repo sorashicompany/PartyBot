@@ -242,14 +242,21 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
                 {room.isPromptAuthor ? <p className="lead">Ты автор — голосуют другие. Зато чат зала твой.</p> : null}
                 <div className="duel">
                   {activeAnswers.map((item, index) => (
-                    <button key={item.id} className="quip" disabled={busy || item.own || lockedVote || room.isPromptAuthor} onClick={() => void action("/api/game/vote", { answerId: item.id })}>
+                    <button
+                      key={item.id}
+                      className={`quip${item.voted ? " chosen" : ""}`}
+                      aria-pressed={item.voted}
+                      aria-label={`Ответ ${MARKS[index] || index + 1}: ${item.text}`}
+                      disabled={busy || item.own || lockedVote || room.isPromptAuthor}
+                      onClick={() => void action("/api/game/vote", { answerId: item.id })}
+                    >
                       <span className="mark">{MARKS[index] || index + 1}</span>
                       <p className="punch">{item.text}</p>
                       <span className="stamp">{item.own ? "это ты" : item.voted ? "голос ушёл" : lockedVote ? "уже выбрал" : "выбрать"}</span>
                     </button>
                   ))}
                 </div>
-                <p className="sub">{lockedVote ? "Ждём зал." : `Голоса ${room.unitVotes}/${room.unitVotesNeeded}`}</p>
+                <p className="sub" role="status" aria-live="polite">{lockedVote ? "Ждём зал." : `Голоса ${room.unitVotes}/${room.unitVotesNeeded}`}</p>
                 <Audience chat={room.chat || []} draft={draft} busy={busy} logRef={logRef} onDraft={setDraft} onSend={(text) => void action("/api/game/chat", { text })} />
               </div>
             ) : null}
