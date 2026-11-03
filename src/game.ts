@@ -99,10 +99,8 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
     await doRoom.saveRoundQuestion({ round: room.round_number, userId: user.id, promptId: inserted[0].id, promptSlot });
     await notify(env, code, "room_changed", { code, customQuestionSubmitted: true });
     const questions = await doRoom.getRoundQuestions(room.round_number);
-    const required = players.length;
-    const done = room.round_number === 3
-      ? questions.some(item => Number(item.userId) === user.id)
-      : questions.some(item => Number(item.userId) === user.id);
+    const required = room.round_number === 3 ? 1 : players.length;
+    const done = questions.some(item => Number(item.userId) === user.id);
     await announce(env, code, room.round_number === 3
       ? `<b>${escapeHtml(writer.display_name)}</b> придумал(а) финальный вопрос. Сам(а) на него не отвечает.`
       : `<b>${escapeHtml(writer.display_name)}</b> отправил(а) вопрос. Готово: <b>${questions.length}/${required}</b>.`, true);
@@ -825,7 +823,9 @@ async function playBotQuestions(env: Env, room: Room, players: Player[]): Promis
   // If humans finished while bot questions were being generated, let the bot
   // completion unblock the phase immediately instead of waiting for timeout.
   const allQuestions = await doRoom.getRoundQuestions(round);
-  if (round < 3 && allQuestions.length >= players.length) {
+  const botLeaderQuestionReady = round === 3 && Boolean(leader && allQuestions.some(item => Number(item.userId) === Number(leader.telegram_user_id)));
+  const allRoundQuestionsReady = round < 3 && allQuestions.length >= players.length;
+  if (botLeaderQuestionReady || allRoundQuestionsReady) {
     await beginCustomRound(env, { ...room, status: "custom_writing", round_number: round }, players);
   }
 }
