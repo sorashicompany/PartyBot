@@ -140,7 +140,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
   if (!initData) {
     return (
       <main className="stage">
-        <div className="halftone" aria-hidden="true" />
+        <div className="watermark" aria-hidden="true">ПАТИ</div>
         <div className="frame">
           <Brand name={displayName} />
           <section className="sheet slam-in">
@@ -155,7 +155,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
 
   return (
     <main className="stage">
-      <div className="halftone" aria-hidden="true" />
+      <div className="watermark" aria-hidden="true">ПАТИ</div>
       <div className="frame">
         <Brand name={you?.name || displayName || "игрок"} score={you?.score} />
         {!room ? (
@@ -170,7 +170,7 @@ export function MiniApp({ initData, startCode, displayName }: Props) {
             </form>
           </section>
         ) : (
-          <section className={`sheet slam-in${room.status === "voting" ? " vote" : ""}`}>
+          <section className={`sheet slam-in${room.status === "voting" ? " wide" : ""}`}>
             <p className="kicker">
               {room.code}
               {room.round ? ` · раунд ${room.round}/3` : " · лобби"}
@@ -285,24 +285,29 @@ function Brand({ name, score }: { name: string; score?: number }) {
     <header className="topbar">
       <div className="brand-lockup">
         <div>
-          <div className="brand">SORASHI<span>PARTY</span>FUNBOT</div>
-          <p className="mode">QUIPLASH · LIVE ROOM</p>
+          <div className="brand">Сораши <span>Пати</span></div>
+          <p className="mode">Острослов · живая комната</p>
         </div>
       </div>
-      <div className="scorebug">{name}{typeof score === "number" ? ` · ${score.toLocaleString("ru-RU")}` : ""}</div>
+      <div className="scorebug">
+        <span>{name}</span>
+        {typeof score === "number" ? <b>{score.toLocaleString("ru-RU")}</b> : null}
+      </div>
     </header>
   );
 }
 
 function PlayerStrip({ players }: { players: Player[] }) {
   return (
-    <ul className="roster">
+    <div className="strip" aria-label="Игроки комнаты">
       {players.map((player, index) => (
-        <li key={`${player.name}-${index}`} className={player.you ? "you" : undefined}>
-          {player.name} · {player.score.toLocaleString("ru-RU")}{player.isHost ? " · ведущий" : ""}
-        </li>
+        <div key={`${player.name}-${index}`} className={player.you ? "chip you" : "chip"}>
+          <span className="who">{player.name}</span>
+          <span className="pts">{player.score.toLocaleString("ru-RU")}</span>
+          {player.isHost ? <span className="tag"> · ведущий</span> : null}
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }
 
