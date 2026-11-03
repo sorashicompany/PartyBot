@@ -229,6 +229,8 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
   const revealNames = room.status === "round_results" || room.status === "finished";
   const activeAnswers = active ? submitted.filter(answer => pairOf(answer) === active.key) : [];
   const activeVotes = votes.filter(vote => activeAnswers.some(answer => answer.id === vote.answer_id));
+  const playerIdsForState = new Set(players.map(player => Number(player.telegram_user_id)));
+  const activePlayerVotes = activeVotes.filter(vote => playerIdsForState.has(Number(vote.voter_telegram_id)));
   const ownVoteTargets = votes.filter(v => Number(v.voter_telegram_id) === userId).map(v => v.answer_id);
   const voteCounts = Object.fromEntries(submitted.map(a => [a.id, votes.filter(v => v.answer_id === a.id).length]));
   const roomQuestionsCache = room.status === "custom_writing"
@@ -290,7 +292,7 @@ async function getState(env: Env, room: Room, players: Player[], userId: number)
       voted: ownVoteTargets.includes(a.id),
       wager: a.wager || 0,
     })),
-    unitVotes: new Set(activeVotes.map(vote => Number(vote.voter_telegram_id))).size,
+    unitVotes: new Set(activePlayerVotes.map(vote => Number(vote.voter_telegram_id))).size,
     unitVotesNeeded: active ? expectedVoters(room.round_number, players, assignments, active.key) : 0,
     votesCast: ownVoteTargets.length,
     votesNeeded: units.length,
