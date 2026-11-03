@@ -212,9 +212,11 @@
 }
 
 .chip .pts {
+  display: inline-block;
   font-family: var(--font-display);
   font-size: 0.78rem;
   color: var(--color-lime);
+  animation: score-pop 360ms cubic-bezier(.2, 0, 0, 1);
 }
 
 .chip .tag {
