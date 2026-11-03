@@ -34,7 +34,7 @@ export async function handleGameRequest(request: Request, env: Env, user: MiniUs
   const rooms = await supabaseRequest<Room[]>(env, `rooms?code=eq.${code}&select=id,code,host_telegram_id,status,round_number,phase_deadline_at,voting_prompt_index,custom_prompts_enabled&limit=1`);
   let room = rooms[0];
   if (!room) return json({ error: "Комната не найдена" }, 404);
-  let players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&telegram_user_id=gt.0&select=telegram_user_id,display_name,score&order=joined_at.asc`);
+  let players = await supabaseRequest<Player[]>(env, `room_players?room_id=eq.${room.id}&select=telegram_user_id,display_name,score&order=joined_at.asc`);
   if (!players.some(player => Number(player.telegram_user_id) === user.id)) return json({ error: "Вы не в этой комнате" }, 403);
   const advanced = await advanceExpiredPhase(env, room, players);
   room = advanced.room;
@@ -426,7 +426,7 @@ async function loadAnswers(env: Env, room: Room): Promise<Answer[]> {
 }
 
 async function reloadPlayers(env: Env, roomId: string): Promise<Player[]> {
-  return supabaseRequest<Player[]>(env, `room_players?room_id=eq.${roomId}&telegram_user_id=gt.0&select=telegram_user_id,display_name,score&order=joined_at.asc`);
+  return supabaseRequest<Player[]>(env, `room_players?room_id=eq.${roomId}&select=telegram_user_id,display_name,score&order=joined_at.asc`);
 }
 
 function votingUnits(assignments: Assignment[], round: number): Unit[] {
